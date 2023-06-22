@@ -6,6 +6,14 @@ Created on Thu Jun 22 12:01:06 2023
 @author: roncofaber
 """
 
+import os
+
+from pyqchem.parsers.basic import basic_parser_qchem
+from pyqchem import Structure, QchemInput, get_output_from_qchem
+from pyqchem.parsers.parser_optimization import basic_optimization
+from pyqchem.qc_input import CustomSection
+
+#%%
 def write_mbxas_input(my_job, mbxas_parameters):
     
     default_mbxas_parameters = { 'gridP' : 100,
@@ -75,64 +83,37 @@ def submit_qchem_job(my_job, partition, account, procs, time):
         print("submitting... "+my_job)
         
         os.chdir(my_job)
-        ! sbatch {my_job}'/qchem.sh'
+        os.system("sbatch {}/qchem.sh".format(my_job))
             
         return
 
     
-def qchem_job_write(my_job, molecule, qchem_params, from_scratch = True):
+def qchem_job_write(molecule, charge, multiplicity,
+                    qchem_params, run_path, from_scratch = True):
     
-    my_dir, label, exchange, basis, charge, multiplicity, unrestricted, myjob, dielectric,  sym_ignore, symmetry, extra_rem_keywords, extra_sections = qchem_params
+    if os.path.isdir(run_path) == False:
+        os.mkdir(run_path)
     
-    if os.path.isdir(my_job) == False:
-        os.mkdir(my_job)
+    if from_scratch:
+        if os.path.isfile(run_path + 'qchem.input') == True:
+            os.remove(run_path + 'qchem.input')
     
-    if from_scratch == True:
-        if os.path.isfile(my_job+'qchem.input') == True:
-            os.remove(my_job+'qchem.input')
+    # make molecule
+    molecule_str = Structure(
+        coordinates  = molecule.get_positions(),
+        symbols      = molecule.get_chemical_symbols(),
+        charge       = charge,
+        multiplicity = multiplicity)
 
-    molecule_str = Structure(coordinates=molecule.positions,
-                      symbols=molecule.get_chemical_symbols(),
-                      charge=charge,
-                      multiplicity=multiplicity)
-
+    # generate input
+    molecule_str_input = QchemInput(
+            molecule_str,
+            **qchem_params,
+            )
     
-    if dielectric == None:
-        
-        
-            molecule_str_input = QchemInput(molecule_str,
-                      jobtype=jobtype,
-                      exchange=exchange,
-                      basis=basis,
-                      unrestricted=unrestricted, 
-                      max_scf_cycles=500, 
-                      scf_convergence=5,
-                      extra_rem_keywords = extra_rem_keywords,
-                      extra_sections = extra_sections,
-                      geom_opt_max_cycles=500,
-                      sym_ignore = sym_ignore, 
-                      symmetry =  symmetry        
-                                         
-                                )
-    else:
-    
-        molecule_str_input = QchemInput(molecule_str,
-                          jobtype=jobtype,
-                          exchange=exchange,
-                          basis=basis,
-                          unrestricted=unrestricted, 
-                          max_scf_cycles=500, 
-                          scf_convergence=5,
-                          solvent_method='pcm',
-                          solvent_params={'Dielectric': dielectric},  # Cl2CH2
-                          extra_rem_keywords = extra_rem_keywords,
-                          extra_sections = extra_sections,
-                          geom_opt_max_cycles=500
-                                    )
-
-    txt = molecule_str_input.get_txt()
-    with open(my_job + "qchem.input",'a') as f:
-        f.write(txt)
+    # write input in target path (append mode)
+    with open(run_path + "qchem.input", 'a') as fout:
+        fout.write( molecule_str_input.get_txt())
         
     return
 
