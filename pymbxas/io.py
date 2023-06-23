@@ -14,6 +14,26 @@ from pyqchem.parsers.parser_optimization import basic_optimization
 from pyqchem.qc_input import CustomSection
 
 #%%
+
+def set_qchem_environment(run_path):
+    
+    #OnDemand:
+    # os.environ[CONFIG_FILE] = "/global/home/users/asanzmatias/ondemand/data/sys/dashboard/batch_connect/sys/lrc_jupyter/output/eef5b63f-f943-46a1-ac7c-f361e549e800/config.py"
+    
+    QC    = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
+    QCAUX = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
+   
+    #Clearixs qchem
+    os.environ["QC"]    = QC
+    os.environ["QCAUX"] = QCAUX
+   
+    os.environ["QCSCRATCH"] = run_path + "/tmp_scratch"
+    os.environ["PATH"] += "{}/bin:{}/bin/perl".format(QC, QC)
+    
+    return
+
+
+
 def write_mbxas_input(my_job, mbxas_parameters):
     
     default_mbxas_parameters = { 'gridP' : 100,
