@@ -6,6 +6,11 @@ Created on Fri Jun 23 10:32:15 2023
 @author: roncofaber
 """
 
+import os
+from pyqchem.parsers.basic import basic_parser_qchem
+from pyqchem.parsers.parser_optimization import basic_optimization
+#%%
+
 #Read outputs
 def read_qchem_job(output, run_path, jobtype):
     

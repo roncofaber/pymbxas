@@ -7,7 +7,6 @@ Created on Fri Jun 23 10:25:44 2023
 """
 
 import os
-
 #%%
 
 def submit_qchem_job(run_path, partition, account, procs, time,

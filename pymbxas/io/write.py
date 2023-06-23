@@ -7,13 +7,8 @@ Created on Thu Jun 22 12:01:06 2023
 """
 
 import os
-import copy
 
-from pyqchem.parsers.basic import basic_parser_qchem
-from pyqchem import Structure, QchemInput, get_output_from_qchem
-from pyqchem.parsers.parser_optimization import basic_optimization
-from pyqchem.qc_input import CustomSection
-
+from pyqchem import Structure, QchemInput
 #%%
 
 def set_qchem_environment(run_path):
