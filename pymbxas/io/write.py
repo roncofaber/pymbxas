@@ -9,6 +9,8 @@ Created on Thu Jun 22 12:01:06 2023
 import os
 
 from pyqchem import Structure, QchemInput
+from pyqchem.qc_input import CustomSection
+
 #%%
 
 def set_qchem_environment(run_path):
@@ -67,7 +69,8 @@ def write_mbxas_input(mbxas_parameters = {}, run_path = "."):
 
 
 def write_qchem_job(molecule, charge, multiplicity,
-                    qchem_params, run_path, from_scratch = True):
+                    qchem_params, run_path, occupation = None,
+                    from_scratch = True):
     
     # make dir if not existent
     if not os.path.isdir(run_path):
@@ -85,7 +88,19 @@ def write_qchem_job(molecule, charge, multiplicity,
         symbols      = molecule.get_chemical_symbols(),
         charge       = charge,
         multiplicity = multiplicity)
-
+    
+    # check occupation if needed
+    
+    if occupation is not None:
+        
+        occ_section = CustomSection(title='occupied',
+                                    keywords={' ' : occupation})
+        
+        if isinstance(qchem_params["extra_sections"], list):
+            qchem_params["extra_sections"].append(occ_section)
+        else:
+            qchem_params["extra_sections"] = occ_section
+            
     # generate input
     molecule_str_input = QchemInput(
             molecule_str,
@@ -94,6 +109,10 @@ def write_qchem_job(molecule, charge, multiplicity,
     
     # write input in target path (append mode)
     with open(run_path + "qchem.input", write_mode) as fout:
-        fout.write( molecule_str_input.get_txt())
+        
+        if write_mode == "a":
+            fout.write("\n@@@\n\n")
+        
+        fout.write(molecule_str_input.get_txt())
         
     return
