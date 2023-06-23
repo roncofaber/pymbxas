@@ -63,7 +63,7 @@ def submit_mbxas_job(run_path, mbxas_dir):
         fout.write("python {}/RIXS_main.py {}/INP_FILE\n".format(
             mbxas_dir, run_path))
 
-    os.system("bash {}/clearixsjob.sh")
+    os.system("bash {}/clearixsjob.sh".format(run_path))
     
     return
              

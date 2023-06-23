@@ -20,7 +20,9 @@ def set_qchem_environment(run_path):
     
     QC    = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
     QCAUX = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
-   
+    
+    # MBXASDIR = '/global/home/groups/nano/share/software/electrolyte_machine/gitlab_repo/CleaRIXS/'
+    
     #Clearixs qchem
     os.environ["QC"]    = QC
     os.environ["QCAUX"] = QCAUX
