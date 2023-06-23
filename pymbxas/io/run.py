@@ -57,7 +57,8 @@ def submit_qchem_job(run_path, partition, account, procs, time,
     
     
 def submit_mbxas_job(run_path, mbxas_dir):
-        
+    
+    os.chdir(run_path)
     with open("{}/clearixsjob.sh".format(run_path), "w") as fout:
         fout.write("#!/bin/bash\n\n")
         fout.write("python {}/RIXS_main.py {}/INP_FILE\n".format(
