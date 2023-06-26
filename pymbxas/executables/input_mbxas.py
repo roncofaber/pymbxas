@@ -18,7 +18,7 @@ run_path = os.getcwd()
 
 mbxas_parameters = {
     'gridP'    : 1000,
-    'highE'    : 0,#1127.5,
+    'highE'    : 1000,
     'lowE'     : 0,#20,
     'sigma'    : 0.3,
     'do_align' : False,
