@@ -11,9 +11,11 @@ import os
 from pyqchem import Structure, QchemInput
 from pyqchem.qc_input import CustomSection
 
+from pymbxas.utils.check_keywords import determine_occupation
+
 #%%
 
-def set_qchem_environment(run_path):
+def set_qchem_environment(run_path="/tmp"):
     
     #OnDemand:
     # os.environ[CONFIG_FILE] = "/global/home/users/asanzmatias/ondemand/data/sys/dashboard/batch_connect/sys/lrc_jupyter/output/eef5b63f-f943-46a1-ac7c-f361e549e800/config.py"
@@ -94,6 +96,9 @@ def write_qchem_job(molecule, charge, multiplicity,
     # check occupation if needed
     
     if occupation is not None:
+        
+        # check occupation format
+        occupation = determine_occupation(occupation)
         
         occ_section = CustomSection(title='occupied',
                                     keywords={' ' : occupation})
