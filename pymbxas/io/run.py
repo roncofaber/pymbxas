@@ -26,6 +26,9 @@ def submit_qchem_job(run_path, partition, account, procs, time,
             fout.write("#SBATCH --account="+account+"\n")
             fout.write("#SBATCH --chdir="+run_path+"\n")
             
+            if partition.startswith("lr"):
+                fout.write("#SBATCH --qos=lr_normal\n")
+            
             fout.write("export  QC=/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979\n")
             
             fout.write("export QCSCRATCH="+run_path+"\n")
