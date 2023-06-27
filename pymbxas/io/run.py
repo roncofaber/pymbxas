@@ -7,7 +7,7 @@ Created on Fri Jun 23 10:25:44 2023
 """
 
 import os
-import pymbxas
+
 #%%
 
 def submit_qchem_job(run_path, partition, account, procs, time,
@@ -60,7 +60,7 @@ def submit_qchem_job(run_path, partition, account, procs, time,
         return
     
     
-def submit_mbxas_job(run_path, mbxas_dir=pymbxas.__mbxasdir__):
+def submit_mbxas_job(run_path, mbxas_dir):
     
     os.chdir(run_path)
     with open("{}/clearixsjob.sh".format(run_path), "w") as fout:

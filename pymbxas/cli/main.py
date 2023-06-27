@@ -9,9 +9,9 @@ Created on Mon Jun 26 16:59:25 2023
 import argparse
 import os, sys
 
-import pymbxas as pym
-import pymbxas.io
 
+from pymbxas.io import write, run
+from pymbxas import __mbxasdir__
 #%%
 
 def str2bool(v):
@@ -85,7 +85,9 @@ def main(argv=sys.argv[1:]):
     # update default parameters
     mbxas_params.update(attributes.__dict__)
     
-    pym.io.write.write_mbxas_input(mbxas_params, run_path)
+    # write input file
+    write.write_mbxas_input(mbxas_params, run_path)
 
-    pym.io.run.submit_mbxas_job(run_path)
+    # run MBXAS job
+    run.submit_mbxas_job(run_path, __mbxasdir__)
     
