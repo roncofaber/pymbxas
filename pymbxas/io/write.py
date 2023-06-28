@@ -15,27 +15,6 @@ from pymbxas.utils.check_keywords import determine_occupation
 
 #%%
 
-def set_qchem_environment(run_path="/tmp"):
-    
-    #OnDemand:
-    # os.environ[CONFIG_FILE] = "/global/home/users/asanzmatias/ondemand/data/sys/dashboard/batch_connect/sys/lrc_jupyter/output/eef5b63f-f943-46a1-ac7c-f361e549e800/config.py"
-    
-    QC    = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
-    QCAUX = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
-    
-    # MBXASDIR = '/global/home/groups/nano/share/software/electrolyte_machine/gitlab_repo/CleaRIXS/'
-    
-    #Clearixs qchem
-    os.environ["QC"]    = QC
-    os.environ["QCAUX"] = QCAUX
-   
-    os.environ["QCSCRATCH"] = run_path + "/tmp_scratch"
-    os.environ["PATH"] += "{}/bin:{}/bin/perl".format(QC, QC)
-    
-    return
-
-
-
 def write_mbxas_input(mbxas_parameters = {}, run_path = "."):
         
     # define MBXAS input file
