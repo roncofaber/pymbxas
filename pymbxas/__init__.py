@@ -1,20 +1,26 @@
 """PyMBXAS"""
 
+import os
 import sys
-from pymbxas.utils.environment import set_qchem_environment
 
 if sys.version_info[0] == 2:
     raise ImportError('Please run with Python3. This is Python2.')
 
 
-# print("Welcome to pyMBXAS")
-
-# set env
-set_qchem_environment()
-
-
+# package info
 __all__ = ["spectra"]
 __version__ = '0.0.1a'
-__mbxasdir__ = '/global/home/groups/nano/share/software/electrolyte_machine/gitlab_repo/CleaRIXS/'
 
-from pymbxas.spectra import XAS_spectra
+# change those accordingly TODO: maybe set them up when installing pyMBXAS?
+__mbxasdir__   = '/global/home/groups/nano/share/software/electrolyte_machine/gitlab_repo/CleaRIXS/'
+__qcdir__      = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
+__qcauxdir__   = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qcaux-trunk"
+
+try:
+    __scratchdir__ = os.environ["SCRATCH"]
+except:
+    __scratchdir__ = "/tmp"
+
+# set environment
+from .utils.environment import set_qchem_environment
+set_qchem_environment()
