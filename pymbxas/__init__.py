@@ -16,9 +16,11 @@ __mbxasdir__   = '/global/home/groups/nano/share/software/electrolyte_machine/gi
 __qcdir__      = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
 __qcauxdir__   = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qcaux-trunk"
 
-try:
-    __scratchdir__ = os.environ["SCRATCH"]
-except:
+test_path = "/clusterfs/etna/pscratch/{}".format(os.getlogin())
+
+if os.path.exists(test_path):
+    __scratchdir__ = test_path
+else:
     __scratchdir__ = "/tmp"
 
 # set environment
