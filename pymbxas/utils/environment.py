@@ -16,7 +16,7 @@ def set_qchem_environment():
     os.environ["QC"]    =  __qcdir__
     os.environ["QCAUX"] = __qcauxdir__
 
-    os.environ["QCSCRATCH"] = __scratchdir__ + "/tmp_scratch"
+    os.environ["QCSCRATCH"] = __scratchdir__
     os.environ["PATH"] += "{}/bin:{}/bin/perl".format(__qcdir__, __qcdir__)
 
     return
