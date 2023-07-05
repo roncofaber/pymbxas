@@ -19,7 +19,7 @@ def read_qchem_job(output, run_path, jobtype):
     
     file_to_read = "{}/{}".format(run_path, output)
     
-    print(file_to_read)
+    # print(file_to_read)
     with open(file_to_read, "r") as fin:
         output = fin.read()
         

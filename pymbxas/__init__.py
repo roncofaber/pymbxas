@@ -8,7 +8,7 @@ if sys.version_info[0] == 2:
 
 
 # package info
-__all__ = ["spectra"]
+__all__ = ["spectra", "spectras"]
 __version__ = '0.0.1a'
 
 # change those accordingly TODO: maybe set them up when installing pyMBXAS?
@@ -16,11 +16,13 @@ __mbxasdir__   = '/global/home/groups/nano/share/software/electrolyte_machine/gi
 __qcdir__      = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qchem-trunk-34979"
 __qcauxdir__   = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qcaux-trunk"
 
-test_path = "/clusterfs/etna/pscratch/{}".format(os.getlogin())
-
-if os.path.exists(test_path):
-    __scratchdir__ = test_path
-else:
+try:
+    test_path = "/clusterfs/etna/pscratch/{}".format(os.getlogin())
+    if os.path.exists(test_path):
+        __scratchdir__ = test_path
+    else:
+        __scratchdir__ = "/tmp"
+except:
     __scratchdir__ = "/tmp"
 
 # set environment
