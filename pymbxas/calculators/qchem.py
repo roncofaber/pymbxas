@@ -10,6 +10,7 @@ import os
 
 import pymbxas
 from pymbxas.io.copy import copy_output_files
+from pymbxas.build.input import make_qchem_input
 
 from pyqchem import get_output_from_qchem
 
@@ -23,7 +24,8 @@ class Qchem_mbxas():
                  fch_occ     = None,
                  xch_params  = None,
                  xch_occ     = None,
-                 scratch_dir = None
+                 scratch_dir = None,
+                 run_calc    = True,
                  ):
         
         # initialize environment
@@ -40,7 +42,12 @@ class Qchem_mbxas():
         gs_input, fch_input, xch_input = self.setup_inputs(
             structure, gs_params, fch_params, fch_occ, xch_params, xch_occ)
         
-        self.run_calculations(gs_input, fch_input, xch_input)
+        self.gs_input  = gs_input
+        self.fch_input = fch_input
+        self.xch_input = xch_input
+        
+        if run_calc:
+            self.run_calculations(gs_input, fch_input, xch_input)
         
         return
     
@@ -50,23 +57,20 @@ class Qchem_mbxas():
         # GS input
         charge       = 0
         multiplicity = 1
-        gs_input = pymbxas.build.input.make_qchem_input(structure, charge,
-                                                    multiplicity, gs_params)
+        gs_input = make_qchem_input(structure, charge, multiplicity, gs_params)
         
         # FCH input
         charge       = 1
         multiplicity = 2
-        fch_input = pymbxas.build.input.make_qchem_input(structure, charge,
-                                                    multiplicity, fch_params,
-                                                    occupation=fch_occ)
+        fch_input = make_qchem_input(structure, charge, multiplicity,
+                                     fch_params, occupation=fch_occ)
         
         # XCH input (only if specified)
         if xch_params is not None:
             charge       = 0
             multiplicity = 1
-            xch_input = pymbxas.build.input.make_qchem_input(structure, charge,
-                                                        multiplicity, xch_params,
-                                                        occupation=xch_occ)
+            xch_input = make_qchem_input(structure, charge, multiplicity,
+                                         xch_params, occupation=xch_occ)
         else:
             xch_input = None
         
@@ -74,6 +78,7 @@ class Qchem_mbxas():
     
     def run_calculations(self, gs_input, fch_input, xch_input):
         
+        # delete scratch earlier if not XCH calc
         is_xch = True if xch_input is not None else False
         
         # run GS
