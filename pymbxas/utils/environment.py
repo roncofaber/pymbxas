@@ -7,10 +7,14 @@ Created on Tue Jun 27 14:42:44 2023
 """
 
 import os
-from pymbxas import __qcauxdir__, __qcdir__#, __scratchdir__
+from pymbxas import __qcauxdir__, __qcdir__
 #%%
 
-def set_qchem_environment(scratchdir=os.getcwd()):
+def set_qchem_environment(scratchdir=None):
+    
+    # scratch in current directory if not specified
+    if scratchdir is None:
+        scratchdir = os.getcwd()
 
     # Clearixs qchem env. variables
     os.environ["QC"]         =  __qcdir__

@@ -38,52 +38,26 @@ class Qchem_mbxas():
         self.__sdir   = os.getcwd() if scratch_dir is None else scratch_dir
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
         
-        # generate input objects
-        gs_input, fch_input, xch_input = self.setup_inputs(
-            structure, gs_params, fch_params, fch_occ, xch_params, xch_occ)
-        
-        self.gs_input  = gs_input
-        self.fch_input = fch_input
-        self.xch_input = xch_input
-        
+        # run MBXAS calculation
         if run_calc:
             self.run_calculations()
         
         return
-    
-    def setup_inputs(self, structure, gs_params, fch_params, fch_occ,
+     
+    def run_calculations(self, structure, gs_params, fch_params, fch_occ,
                      xch_params, xch_occ):
+        
+        # delete scratch earlier if not XCH calc
+        is_xch = True if xch_params is not None else False
         
         # GS input
         charge       = 0
         multiplicity = 1
         gs_input = make_qchem_input(structure, charge, multiplicity, gs_params)
         
-        # FCH input
-        charge       = 1
-        multiplicity = 2
-        fch_input = make_qchem_input(structure, charge, multiplicity,
-                                     fch_params, occupation=fch_occ)
-        
-        # XCH input (only if specified)
-        if xch_params is not None:
-            charge       = 0
-            multiplicity = 1
-            xch_input = make_qchem_input(structure, charge, multiplicity,
-                                         xch_params, occupation=xch_occ)
-        else:
-            xch_input = None
-        
-        return gs_input, fch_input, xch_input
-    
-    def run_calculations(self):
-        
-        # delete scratch earlier if not XCH calc
-        is_xch = True if self.xch_input is not None else False
-        
         # run GS
         gs_output, gs_data = get_output_from_qchem(
-            self.gs_input, processors = self.__nprocs, use_mpi = True,
+            gs_input, processors = self.__nprocs, use_mpi = True,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
         
@@ -92,28 +66,36 @@ class Qchem_mbxas():
             fout.write(gs_output)
         
         # update input with guess and run FCH
-        self.fch_input.update_input({"scf_guess" : gs_data["coefficients"]})
+        # FCH input
+        charge       = 1
+        multiplicity = 2
+        fch_params["scf_guess"] = gs_data["coefficients"]
+        fch_input = make_qchem_input(structure, charge, multiplicity,
+                                     fch_params, occupation=fch_occ)
           
         fch_output, fch_data = get_output_from_qchem(
-            self.fch_input, processors = self.__nprocs, use_mpi = True,
+            fch_input, processors = self.__nprocs, use_mpi = True,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = not is_xch)
         
         # write input and output plus copy MOM files
         with open("qchem.input", "w") as fout:
-            fout.write(self.fch_input.get_txt())
+            fout.write(fch_input.get_txt())
         with open("qchem.output", "a") as fout: 
             fout.write(fch_output)
         copy_output_files(self.__wdir, self.__cdir)
         
         # only run XCH if there is input
-        if is_xch: 
+        if is_xch:
             
-            # update input with guess and run XCH
-            self.xch_input.update_input({"scf_guess" : fch_data["coefficients"]})
+            charge       = 0
+            multiplicity = 1
+            xch_params["scf_guess"] = fch_data["coefficients"]
+            xch_input = make_qchem_input(structure, charge, multiplicity,
+                                         xch_params, occupation=xch_occ)
             
             xch_output, xch_data = get_output_from_qchem(
-                self.xch_input, processors = self.__nprocs, use_mpi = True,
+                xch_input, processors = self.__nprocs, use_mpi = True,
                 return_electronic_structure = True, scratch = self.__sdir,
                 delete_scratch = is_xch)
         
