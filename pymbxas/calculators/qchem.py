@@ -102,7 +102,7 @@ class Qchem_mbxas():
             
             charge       = 0
             multiplicity = 1
-            xch_params["scf_guess"] = fch_data["coefficients"]
+            xch_params["scf_guess"] = gs_data["coefficients"]
             xch_input = make_qchem_input(structure, charge, multiplicity,
                                          xch_params, occupation=xch_occ)
             
