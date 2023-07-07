@@ -94,6 +94,10 @@ class Qchem_mbxas():
         # update input with guess and run FCH
         fch_input.update_input({"scf_guess" : gs_data["coefficients"]})
         
+        # write input and output plus copy MOM files
+        with open("qchem.input", "w") as fout:
+            fout.write(fch_input.get_txt())
+        
         fch_output, fch_data = get_output_from_qchem(
             fch_input, processors = self.__nprocs, use_mpi = True,
             return_electronic_structure = True, scratch = self.__sdir,
