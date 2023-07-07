@@ -13,6 +13,7 @@ from pymbxas.io.copy import copy_output_files
 from pymbxas.build.input import make_qchem_input
 
 from pyqchem import get_output_from_qchem
+from pyqchem.file_io import write_to_fchk
 
 #%%
 
@@ -25,6 +26,7 @@ class Qchem_mbxas():
                  xch_params  = None,
                  xch_occ     = None,
                  scratch_dir = None,
+                 print_fchk  = False,
                  run_calc    = True,
                  ):
         
@@ -44,12 +46,12 @@ class Qchem_mbxas():
         # run MBXAS calculation
         if run_calc:
             self.run_calculations(structure, gs_params, fch_params, fch_occ,
-                             xch_params, xch_occ)
+                             xch_params, xch_occ, print_fchk)
         
         return
      
     def run_calculations(self, structure, gs_params, fch_params, fch_occ,
-                     xch_params, xch_occ):
+                     xch_params, xch_occ, print_fchk):
         
         # delete scratch earlier if not XCH calc
         is_xch = True if xch_params is not None else False
@@ -68,6 +70,9 @@ class Qchem_mbxas():
         # write output file #TODO change in the future to be more flexible
         with open("qchem.output", "w") as fout: 
             fout.write(gs_output)
+        
+        if print_fchk:
+            write_to_fchk(gs_data, 'output_gs.fchk')
         
         # update input with guess and run FCH
         # FCH input
@@ -89,6 +94,9 @@ class Qchem_mbxas():
             fout.write(fch_output)
         copy_output_files(self.__wdir, self.__cdir)
         
+        if print_fchk:
+            write_to_fchk(fch_data, 'output_fch.fchk')
+        
         # only run XCH if there is input
         if is_xch:
             
@@ -102,7 +110,10 @@ class Qchem_mbxas():
                 xch_input, processors = self.__nprocs, use_mpi = True,
                 return_electronic_structure = True, scratch = self.__sdir,
                 delete_scratch = is_xch)
-        
+            
+            if print_fchk:
+                write_to_fchk(xch_data, 'output_xch.fchk')
+                
             # generate AlignDir directory #TODO change for more flex
             os.mkdir("AlignDir")
             
