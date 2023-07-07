@@ -38,9 +38,13 @@ class Qchem_mbxas():
         self.__sdir   = os.getcwd() if scratch_dir is None else scratch_dir
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
         
+        # store data
+        self.structure = structure
+        
         # run MBXAS calculation
         if run_calc:
-            self.run_calculations()
+            self.run_calculations(structure, gs_params, fch_params, fch_occ,
+                             xch_params, xch_occ)
         
         return
      
