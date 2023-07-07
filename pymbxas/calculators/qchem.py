@@ -47,7 +47,7 @@ class Qchem_mbxas():
         self.xch_input = xch_input
         
         if run_calc:
-            self.run_calculations(gs_input, fch_input, xch_input)
+            self.run_calculations()
         
         return
     
@@ -76,14 +76,14 @@ class Qchem_mbxas():
         
         return gs_input, fch_input, xch_input
     
-    def run_calculations(self, gs_input, fch_input, xch_input):
+    def run_calculations(self):
         
         # delete scratch earlier if not XCH calc
-        is_xch = True if xch_input is not None else False
+        is_xch = True if self.xch_input is not None else False
         
         # run GS
         gs_output, gs_data = get_output_from_qchem(
-            gs_input, processors = self.__nprocs, use_mpi = True,
+            self.gs_input, processors = self.__nprocs, use_mpi = True,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
         
@@ -92,28 +92,28 @@ class Qchem_mbxas():
             fout.write(gs_output)
         
         # update input with guess and run FCH
-        fch_input.update_input({"scf_guess" : gs_data["coefficients"]})
+        self.fch_input.update_input({"scf_guess" : gs_data["coefficients"]})
           
         fch_output, fch_data = get_output_from_qchem(
-            fch_input, processors = self.__nprocs, use_mpi = True,
+            self.fch_input, processors = self.__nprocs, use_mpi = True,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = not is_xch)
         
         # write input and output plus copy MOM files
         with open("qchem.input", "w") as fout:
-            fout.write(fch_input.get_txt())
+            fout.write(self.fch_input.get_txt())
         with open("qchem.output", "a") as fout: 
             fout.write(fch_output)
         copy_output_files(self.__wdir, self.__cdir)
         
         # only run XCH if there is input
-        if xch_input is not None: 
+        if is_xch: 
             
             # update input with guess and run XCH
-            xch_input.update_input({"scf_guess" : fch_data["coefficients"]})
+            self.xch_input.update_input({"scf_guess" : fch_data["coefficients"]})
             
             xch_output, xch_data = get_output_from_qchem(
-                xch_input, processors = self.__nprocs, use_mpi = True,
+                self.xch_input, processors = self.__nprocs, use_mpi = True,
                 return_electronic_structure = True, scratch = self.__sdir,
                 delete_scratch = is_xch)
         
