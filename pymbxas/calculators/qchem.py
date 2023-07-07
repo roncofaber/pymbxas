@@ -92,7 +92,7 @@ class Qchem_mbxas():
             fout.write(gs_output)
         
         # update input with guess and run FCH
-        # fch_input.update_input({"scf_guess" : gs_data["coefficients"]})
+        fch_input.update_input({"scf_guess" : gs_data["coefficients"]})
           
         fch_output, fch_data = get_output_from_qchem(
             fch_input, processors = self.__nprocs, use_mpi = True,
@@ -110,7 +110,7 @@ class Qchem_mbxas():
         if xch_input is not None: 
             
             # update input with guess and run XCH
-            # xch_input.update_input({"scf_guess" : fch_data["coefficients"]})
+            xch_input.update_input({"scf_guess" : fch_data["coefficients"]})
             
             xch_output, xch_data = get_output_from_qchem(
                 xch_input, processors = self.__nprocs, use_mpi = True,
