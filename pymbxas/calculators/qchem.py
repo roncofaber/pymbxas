@@ -81,7 +81,7 @@ class Qchem_mbxas():
         # FCH input
         multiplicity = 2
         fch_input = make_qchem_input(structure, charge+1, multiplicity,
-                                     qchem_params, occupation=fch_occ,
+                                     qchem_params, "fch", occupation=fch_occ,
                                      scf_guess=gs_data["coefficients"])
 
         fch_output, fch_data = get_output_from_qchem(
@@ -104,7 +104,7 @@ class Qchem_mbxas():
         if is_xch:
             multiplicity = 1
             xch_input = make_qchem_input(structure, charge, multiplicity,
-                                         qchem_params, occupation=xch_occ,
+                                         qchem_params, "xch", occupation=xch_occ,
                                          scf_guess=fch_data["coefficients"])
 
             xch_output, xch_data = get_output_from_qchem(
