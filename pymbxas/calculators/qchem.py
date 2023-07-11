@@ -126,7 +126,7 @@ class Qchem_mbxas():
 
         structure = self.structure
         charge = self.charge + 1 # +1 cause we kick out one lil electron
-        multiplicity = abs(self.n_alpha - self.n_beta) + 1
+        multiplicity = abs(self.n_alpha - self.n_beta - 1) + 1
         qchem_params = self.qchem_params
         fch_occ = self.fch_occ
 
