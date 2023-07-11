@@ -14,7 +14,7 @@ from pymbxas.utils.check_keywords import determine_occupation
 
 gs_def_params = {
     "extra_rem_keywords" : {"TRANS_MOM_SAVE" : True,
-                            "BOYSCALC"       : "2:
+                            "BOYSCALC"       : "2",
                             },
     }
 
