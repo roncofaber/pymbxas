@@ -206,7 +206,7 @@ class Qchem_mbxas():
             for s in a['shells']:
                 st=s['shell_type']
                 sf=s['functions']
-                print(s)
+                print(c, s)
                 if st in indices:
                     indices[st]=indices[st] + list(range(c,c+sf))
                     variance[st]= variance[st] + list(np.repeat(np.sum(np.multiply(s['con_coefficients'],1.0/np.array(s['p_exponents']))),sf))
