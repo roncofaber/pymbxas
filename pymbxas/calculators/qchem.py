@@ -110,7 +110,7 @@ class Qchem_mbxas():
         self.output["gs"] = gs_output
 
         # do boys postprocessing to understand orbital occupations
-        # self.__boys_postprocess(gs_data)
+        self.__boys_postprocess(gs_data)
 
         # write output file #TODO change in the future to be more flexible
         with open("qchem.output", "w") as fout:
