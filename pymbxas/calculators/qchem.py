@@ -27,7 +27,7 @@ class Qchem_mbxas():
                  scratch_dir    = None,
                  print_fchk     = False,
                  run_calc       = True,
-                 use_mpi        = True,
+                 use_mpi        = False, # somewhat MPI is not working atm
                  ):
 
         # initialize environment (set env variables)
