@@ -20,20 +20,21 @@ from pyqchem.file_io import write_to_fchk
 class Qchem_mbxas():
 
     def __init__(self, structure,
-                 gs_params   = None,
-                 fch_params  = None,
-                 fch_occ     = None,
-                 xch_params  = None,
-                 xch_occ     = None,
-                 scratch_dir = None,
-                 print_fchk  = False,
-                 run_calc    = True,
+                 qchem_params   = None,
+                 charge         = 0,
+                 fch_occ        = None,
+                 xch_occ        = None,
+                 scratch_dir    = None,
+                 print_fchk     = False,
+                 run_calc       = True,
+                 use_mpi        = True,
                  ):
 
-        # initialize environment
+        # initialize environment (set env variables)
         pymbxas.utils.environment.set_qchem_environment()
 
         # set up internal variables
+        self.__is_mpi = use_mpi
         self.__nprocs = os.cpu_count()
         self.__pid    = os.getpid()
         self.__cdir   = os.getcwd()
@@ -41,29 +42,31 @@ class Qchem_mbxas():
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
 
         # store data
-        self.structure = structure
+        self.structure    = structure
+        self.charge       = charge
+        self.qchem_params = qchem_params
 
         # run MBXAS calculation
         if run_calc:
-            self.run_calculations(structure, gs_params, fch_params, fch_occ,
-                             xch_params, xch_occ, print_fchk)
+            self.run_calculations(structure, qchem_params, charge, fch_occ,
+                                  xch_occ, print_fchk)
 
         return
 
-    def run_calculations(self, structure, gs_params, fch_params, fch_occ,
-                     xch_params, xch_occ, print_fchk):
+    def run_calculations(self, structure, qchem_params, charge, fch_occ,
+                         xch_occ, print_fchk):
 
         # delete scratch earlier if not XCH calc
-        is_xch = True if xch_params is not None else False
+        is_xch = True if xch_occ is not None else False
 
         # GS input
-        charge       = 0
         multiplicity = 1
-        gs_input = make_qchem_input(structure, charge, multiplicity, gs_params)
+        gs_input = make_qchem_input(structure, charge, multiplicity,
+                             qchem_params, "gs", occupation = None)
 
         # run GS
         gs_output, gs_data = get_output_from_qchem(
-            gs_input, processors = self.__nprocs, use_mpi = True,
+            gs_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
 
@@ -76,22 +79,22 @@ class Qchem_mbxas():
 
         # update input with guess and run FCH
         # FCH input
-        charge       = 1
         multiplicity = 2
-        fch_params["scf_guess"] = gs_data["coefficients"]
-        fch_input = make_qchem_input(structure, charge, multiplicity,
-                                     fch_params, occupation=fch_occ)
+        fch_input = make_qchem_input(structure, charge+1, multiplicity,
+                                     qchem_params, occupation=fch_occ,
+                                     scf_guess=gs_data["coefficients"])
 
         fch_output, fch_data = get_output_from_qchem(
-            fch_input, processors = self.__nprocs, use_mpi = True,
+            fch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = not is_xch)
 
-        # write input and output plus copy MOM files
+        # write input and output
         with open("qchem.input", "w") as fout:
             fout.write(fch_input.get_txt())
         with open("qchem.output", "a") as fout:
             fout.write(fch_output)
+        # copy MOM files in relevant directory
         copy_output_files(self.__wdir, self.__cdir)
 
         if print_fchk:
@@ -99,15 +102,13 @@ class Qchem_mbxas():
 
         # only run XCH if there is input
         if is_xch:
-
-            charge       = 0
             multiplicity = 1
-            xch_params["scf_guess"] = fch_data["coefficients"]
             xch_input = make_qchem_input(structure, charge, multiplicity,
-                                         xch_params, occupation=xch_occ)
+                                         qchem_params, occupation=xch_occ,
+                                         scf_guess=fch_data["coefficients"])
 
             xch_output, xch_data = get_output_from_qchem(
-                xch_input, processors = self.__nprocs, use_mpi = True,
+                xch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
                 return_electronic_structure = True, scratch = self.__sdir,
                 delete_scratch = is_xch)
 

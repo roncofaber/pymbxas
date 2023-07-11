@@ -12,8 +12,27 @@ from pymbxas.utils.check_keywords import determine_occupation
 
 #%%
 
+gs_def_params = {
+    "extra_rem_keywords" : {"TRANS_MOM_SAVE" : True},
+    }
+
+xas_def_params = {
+    "extra_rem_keywords" : {
+        "TRANS_MOM_READ" : True,
+        'MOM_METHOD'     : 'IMOM',
+        "SCF_GUESS"      : 'read',
+        "MOM_START"      : 1 ,
+        "use_libqints"   : 1
+    },
+    }
+
+
+#%%
+
+
 def make_qchem_input(molecule, charge, multiplicity,
-                     qchem_params, occupation = None):
+                     qchem_params, calc_type, occupation = None,
+                     scf_guess = None):
 
     # make molecule
     molecule_str = Structure(
@@ -22,10 +41,18 @@ def make_qchem_input(molecule, charge, multiplicity,
         charge       = charge,
         multiplicity = multiplicity)
 
+    # copy parameters to not mess stuff
+    qchem_params = qchem_params.copy()
+
+    # update params depending on calculation
+    if calc_type == "gs":
+        qchem_params.update(gs_def_params)
+    elif calc_type in ["fch", "xch"]:
+        qchem_params.update(xas_def_params)
+    qchem_params["scf_guess"] = scf_guess
+
     # check occupation if needed
-
     if occupation is not None:
-
         # check occupation format
         occupation = determine_occupation(occupation)
         occ_section = CustomSection(title='occupied',
