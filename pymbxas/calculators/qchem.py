@@ -102,7 +102,7 @@ class Qchem_mbxas():
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
 
-        print(gs_data.keys())
+        print(gs_data['number_of_electrons'])
 
         # store output
         self.output["gs"] = gs_output
