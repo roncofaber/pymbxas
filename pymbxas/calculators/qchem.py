@@ -35,6 +35,7 @@ class Qchem_mbxas():
                  print_fchk     = False,
                  run_calc       = True,
                  use_mpi        = False, # somewhat MPI is not working atm
+                 use_boys       = True, # use Boys localization or not
                  ):
 
         # initialize environment (set env variables)
@@ -48,6 +49,7 @@ class Qchem_mbxas():
         self.__sdir   = os.getcwd() if scratch_dir is None else scratch_dir
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
         self.__print_fchk = print_fchk
+        self.__use_boys   = use_boys
         # delete scratch earlier if not XCH calc
         self.__is_xch = True if xch_occ is not None else False
 
@@ -75,7 +77,10 @@ class Qchem_mbxas():
         gs_output, gs_data = self.run_ground_state()
 
         # run FCH
-        fch_output, fch_data  = self.run_fch(gs_data["localized_coefficients"]) #TODO change only if Boys
+
+        scf_guess = gs_data["localized_coefficients"] if self.__use_boys else gs_data["coefficients"]
+
+        fch_output, fch_data  = self.run_fch(scf_guess) #TODO change only if Boys
 
         # only run XCH if there is input
         if self.__is_xch:
