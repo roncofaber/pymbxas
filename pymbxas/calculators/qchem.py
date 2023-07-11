@@ -24,9 +24,11 @@ from pyqchem.file_io import write_to_fchk
 
 class Qchem_mbxas():
 
-    def __init__(self, structure,
+    def __init__(self,
+                 structure,
+                 charge,
+                 multiplicity,
                  qchem_params   = None,
-                 charge         = 0,
                  fch_occ        = None,
                  xch_occ        = None,
                  scratch_dir    = None,
@@ -45,56 +47,101 @@ class Qchem_mbxas():
         self.__cdir   = os.getcwd()
         self.__sdir   = os.getcwd() if scratch_dir is None else scratch_dir
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
+        self.__print_fchk = print_fchk
 
         # store data
         self.structure    = structure
         self.charge       = charge
+        self.multiplicity = multiplicity
         self.qchem_params = qchem_params
+        self.fch_occ      = fch_occ
+        self.xch_occ      = xch_occ
+
+        # delete scratch earlier if not XCH calc
+        self.__is_xch = True if xch_occ is not None else False
+
+        # initialize empty stuff
+        self.output = {}
 
         # run MBXAS calculation
         if run_calc:
-            self.run_calculations(structure, qchem_params, charge, fch_occ,
-                                  xch_occ, print_fchk)
+            self.run_all_calculations()
 
         return
 
-    def run_calculations(self, structure, qchem_params, charge, fch_occ,
-                         xch_occ, print_fchk):
+    # Function to run all calc (GS, FCH, XCH) in sequence
+    def run_all_calculations(self):
 
-        # delete scratch earlier if not XCH calc
-        is_xch = True if xch_occ is not None else False
+        # run ground state
+        gs_output, gs_data = self.run_ground_state()
+
+        # run FCH
+        fch_output, fch_data  = self.run_fch(gs_data["coefficients"])
+
+        # only run XCH if there is input
+        if self.__is_xch:
+            xch_output, xch_data = self.run_xch(fch_data["coefficients"])
+
+        return
+
+    # run the GS calculation
+    def run_ground_state(self):
+
+        structure = self.structure
+        charge = self.charge
+        multiplicity = self.multiplicity
+        qchem_params = self.qchem_params
 
         # GS input
-        multiplicity = 1
         gs_input = make_qchem_input(structure, charge, multiplicity,
                              qchem_params, "gs", occupation = None)
 
-        # run GS
+        # run calculation
         gs_output, gs_data = get_output_from_qchem(
             gs_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
 
-        self.__boys_postprocess(gs_data)
+        print(gs_data.keys())
+
+        # store output
+        self.output["gs"] = gs_output
+
+        # do boys postprocessing to understand orbital occupations
+        # self.__boys_postprocess(gs_data)
 
         # write output file #TODO change in the future to be more flexible
         with open("qchem.output", "w") as fout:
             fout.write(gs_output)
 
-        if print_fchk:
+        if self.__print_fchk:
             write_to_fchk(gs_data, 'output_gs.fchk')
 
-        # update input with guess and run FCH
+        return gs_output, gs_data
+
+    # run the FCH calculation
+    def run_fch(self, scf_guess=None):
+
+        structure = self.structure
+        charge = self.charge
+        multiplicity = self.multiplicity
+        qchem_params = self.qchem_params
+        fch_occ = self.fch_occ
+
         # FCH input
         multiplicity = 2
         fch_input = make_qchem_input(structure, charge+1, multiplicity,
                                      qchem_params, "fch", occupation=fch_occ,
-                                     scf_guess=gs_data["coefficients"])
+                                     scf_guess=scf_guess)
 
+        # run calculation
         fch_output, fch_data = get_output_from_qchem(
             fch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
-            delete_scratch = not is_xch)
+            delete_scratch = not self.__is_xch)
+
+        # store output
+        self.output["fch"] = fch_output
 
         # write input and output
         with open("qchem.input", "w") as fout:
@@ -104,34 +151,47 @@ class Qchem_mbxas():
         # copy MOM files in relevant directory
         copy_output_files(self.__wdir, self.__cdir)
 
-        if print_fchk:
+        if self.__print_fchk:
             write_to_fchk(fch_data, 'output_fch.fchk')
 
-        # only run XCH if there is input
-        if is_xch:
-            multiplicity = 1
-            xch_input = make_qchem_input(structure, charge, multiplicity,
-                                         qchem_params, "xch", occupation=xch_occ,
-                                         scf_guess=fch_data["coefficients"])
+        return fch_output, fch_data
 
-            xch_output, xch_data = get_output_from_qchem(
-                xch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
-                return_electronic_structure = True, scratch = self.__sdir,
-                delete_scratch = is_xch)
+    # run the XCH calculation
+    def run_xch(self, scf_guess=None):
 
-            if print_fchk:
-                write_to_fchk(xch_data, 'output_xch.fchk')
+        structure = self.structure
+        charge = self.charge
+        multiplicity = self.multiplicity
+        qchem_params = self.qchem_params
+        xch_occ = self.xch_occ
 
-            # generate AlignDir directory #TODO change for more flex
-            os.mkdir("AlignDir")
+        # XCH input
+        xch_input = make_qchem_input(structure, charge, multiplicity,
+                                     qchem_params, "xch", occupation=xch_occ,
+                                     scf_guess=scf_guess)
 
-            # write XCH output file
-            with open("AlignDir/align_calc.out", "w") as fout:
-                fout.write(xch_output)
+        # run calculation
+        xch_output, xch_data = get_output_from_qchem(
+            xch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
+            return_electronic_structure = True, scratch = self.__sdir,
+            delete_scratch = self.__is_xch)
 
-        return
+        # store output
+        self.output["xch"] = xch_output
 
+        if self.__print_fchk:
+            write_to_fchk(xch_data, 'output_xch.fchk')
 
+        # generate AlignDir directory #TODO change for more flex
+        os.mkdir("AlignDir")
+
+        # write XCH output file
+        with open("AlignDir/align_calc.out", "w") as fout:
+            fout.write(xch_output)
+
+        return xch_output, xch_data
+
+    # do Boys postprocessing
     def __boys_postprocess(self, gs_electronic_structure):
 
         symbols = self.structure.get_chemical_symbols()
