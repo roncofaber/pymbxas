@@ -134,6 +134,8 @@ class Qchem_mbxas():
 
     def __boys_postprocess(self, gs_electronic_structure):
 
+        symbols = self.structure.get_chemical_symbols()
+
         #for boys_orb in gs_electronic_structure['localized_coefficients']['alpha']:
         indices={}
         variance={}
@@ -163,3 +165,69 @@ class Qchem_mbxas():
                 w[st] = np.dot(v,v)
                 var[st] = np.dot(np.abs(v),variance[st])
             print(iboys,w,var)
+
+        atom_coeffs=[]
+        satom=0
+        for i,a in enumerate(gs_electronic_structure['basis']['atoms']):
+            print(a['symbol'],a['atomic_number'])
+            istart=satom
+            for s in a['shells']:
+                #print(s)
+                #print(s['functions'])
+                satom+=s['functions']
+            atom_coeffs.append(slice(istart,satom))
+            print('atom_coeffs',atom_coeffs[i])
+
+        #print(np.sum([bo*bo for bo in gs_electronic_structure['localized_coefficients']['alpha'][0][atom_coeffs[1]]]))
+
+        # loop over atoms
+        num_1s_cores = len([atom for atom in symbols if atom!='H'])
+
+        atom_boys_alpha=[]
+        atom_boys_beta=[]
+        core_orbital_of_atom={'alpha':{}, 'beta':{}}
+        core_orbital_alpha_of_atom={}
+        core_orbital_beta_of_atom={}
+        for iorb in range(num_1s_cores):
+            # where is Boys orbital i localized?
+            boys_orb = gs_electronic_structure['localized_coefficients']['alpha'][iorb]
+            atom_weight=[]
+            for iatom,atom in enumerate(gs_electronic_structure['basis']['atoms']):
+                atom_weight.append(np.sum([bo*bo for bo in boys_orb[atom_coeffs[iatom]]]))
+            iatom=np.argmax(atom_weight)
+            atom_boys_alpha.append([iatom,symbols[iatom]])
+            core_orbital_alpha_of_atom[iatom] = iorb
+            core_orbital_of_atom['alpha'][iatom] = iorb
+            print('Boys alpha orbital',iorb,'localized on atom',atom_boys_alpha[iorb])
+
+            # Now beta
+            boys_orb = gs_electronic_structure['localized_coefficients']['beta'][iorb]
+            atom_weight=[]
+            for iatom,atom in enumerate(gs_electronic_structure['basis']['atoms']):
+                atom_weight.append(np.sum([bo*bo for bo in boys_orb[atom_coeffs[iatom]]]))
+            iatom=np.argmax(atom_weight)
+            atom_boys_beta.append([iatom,symbols[iatom]])
+            core_orbital_beta_of_atom[iatom] = iorb
+            core_orbital_of_atom['beta'][iatom] = iorb
+            print('Boys  beta orbital',iorb,'localized on atom',atom_boys_beta[iorb])
+
+        # Build occupied orbital list
+        nalpha=gs_electronic_structure['number_of_electrons']['alpha']
+        nbeta=gs_electronic_structure['number_of_electrons']['beta']
+        gs_orblist={'alpha':[str(i+1) for i in range(nalpha)],
+                    'beta' :[str(i+1) for i in range(nbeta)]}
+        print(" ".join(gs_orblist['alpha'])+"\n"+" ".join(gs_orblist['beta']))
+
+        occupations=[]
+        for iatom,atom in enumerate(symbols):
+            if(atom=='H'): continue
+            for ch in gs_orblist.keys():
+                if(ch=='alpha'): continue # only excite beta - is this a requirement that Nalpha>Nbeta?
+                ix=core_orbital_of_atom[ch][iatom]
+                print('core exciting',atom,'1s of atom',iatom,'in channel',ch,'( orbital',ix+1,')')
+                orblist=gs_orblist.copy()
+                orblist['alpha']=gs_orblist['alpha'].copy()
+                orblist['beta']=gs_orblist['beta'].copy()
+                del orblist[ch][ix]
+                occupations.append(" ".join(orblist['alpha'])+"\n"+" ".join(orblist['beta']))
+                print(occupations[-1])

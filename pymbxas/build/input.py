@@ -21,7 +21,7 @@ gs_def_params = {
 xas_def_params = {
     "extra_rem_keywords" : {
         "TRANS_MOM_READ" : True,
-        'MOM_METHOD'     : 'IMOM',
+        'MOM_METHOD'     : 'MOM', # or IMOM?
         "SCF_GUESS"      : 'read',
         "MOM_START"      : 1 ,
         "use_libqints"   : 1
