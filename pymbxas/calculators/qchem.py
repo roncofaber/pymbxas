@@ -75,7 +75,7 @@ class Qchem_mbxas():
         gs_output, gs_data = self.run_ground_state()
 
         # run FCH
-        fch_output, fch_data  = self.run_fch(gs_data["coefficients"])
+        fch_output, fch_data  = self.run_fch(gs_data["localized_coefficients"]) #TODO change only if Boys
 
         # only run XCH if there is input
         if self.__is_xch:
@@ -197,35 +197,6 @@ class Qchem_mbxas():
 
         symbols = self.structure.get_chemical_symbols()
 
-        #for boys_orb in gs_electronic_structure['localized_coefficients']['alpha']:
-        indices={}
-        variance={}
-        for i,a in enumerate(gs_electronic_structure['basis']['atoms']):
-            print(a['symbol'],a['atomic_number'])
-            c=0
-            for s in a['shells']:
-                st=s['shell_type']
-                sf=s['functions']
-                print(c, s)
-                if st in indices:
-                    indices[st]=indices[st] + list(range(c,c+sf))
-                    variance[st]= variance[st] + list(np.repeat(np.sum(np.multiply(s['con_coefficients'],1.0/np.array(s['p_exponents']))),sf))
-                else:
-                    indices[st] = list(range(c,c+sf))
-                    variance[st] = list(np.repeat(np.sum(np.multiply(s['con_coefficients'],1.0/np.array(s['p_exponents']))),sf))
-                c+=sf
-
-        print(indices,variance)
-
-        for iboys,boys_orb in enumerate(gs_electronic_structure['localized_coefficients']['alpha']):
-            w={}
-            var={}
-            for st,ind in indices.items():
-                #print(st,ind)
-                v = np.array(list(boys_orb[i] for i in ind))
-                w[st] = np.dot(v,v)
-                var[st] = np.dot(np.abs(v),variance[st])
-            print(iboys,w,var)
 
         atom_coeffs=[]
         satom=0
@@ -239,17 +210,15 @@ class Qchem_mbxas():
             atom_coeffs.append(slice(istart,satom))
             print('atom_coeffs',atom_coeffs[i])
 
-        #print(np.sum([bo*bo for bo in gs_electronic_structure['localized_coefficients']['alpha'][0][atom_coeffs[1]]]))
-
         # loop over atoms
-        num_1s_cores = len([atom for atom in symbols if atom!='H'])
+        num_1s_cores = len([atom for atom in symbols if atom!='H']) #TODO num of cores function (from atom number)
 
         atom_boys_alpha=[]
         atom_boys_beta=[]
         core_orbital_of_atom={'alpha':{}, 'beta':{}}
         core_orbital_alpha_of_atom={}
         core_orbital_beta_of_atom={}
-        for iorb in range(num_1s_cores):
+        for iorb in range(num_1s_cores): #TODO fix this (WRONG)
             # where is Boys orbital i localized?
             boys_orb = gs_electronic_structure['localized_coefficients']['alpha'][iorb]
             atom_weight=[]
