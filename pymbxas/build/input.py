@@ -31,7 +31,8 @@ xas_def_params = {
 
 #%%
 
-
+# Function to generate an input for a QCHEM calculation,
+# specify calc type to add default params needed for MBXAS
 def make_qchem_input(molecule, charge, multiplicity,
                      qchem_params, calc_type, occupation = None,
                      scf_guess = None):

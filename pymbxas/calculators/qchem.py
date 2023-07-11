@@ -8,10 +8,15 @@ Created on Fri Jul  7 12:28:13 2023
 
 import os
 
+# good ol' numpy
+import numpy as np
+
+# self module utilities
 import pymbxas
 from pymbxas.io.copy import copy_output_files
 from pymbxas.build.input import make_qchem_input
 
+# pyqchem stuff
 from pyqchem import get_output_from_qchem
 from pyqchem.file_io import write_to_fchk
 
@@ -70,6 +75,8 @@ class Qchem_mbxas():
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
 
+        self.__boys_postprocess(gs_data)
+
         # write output file #TODO change in the future to be more flexible
         with open("qchem.output", "w") as fout:
             fout.write(gs_output)
@@ -123,3 +130,36 @@ class Qchem_mbxas():
                 fout.write(xch_output)
 
         return
+
+
+    def __boys_postprocess(self, gs_electronic_structure):
+
+        #for boys_orb in gs_electronic_structure['localized_coefficients']['alpha']:
+        indices={}
+        variance={}
+        for i,a in enumerate(gs_electronic_structure['basis']['atoms']):
+            print(a['symbol'],a['atomic_number'])
+            c=0
+            for s in a['shells']:
+                st=s['shell_type']
+                sf=s['functions']
+                print(s)
+                if st in indices:
+                    indices[st]=indices[st] + list(range(c,c+sf))
+                    variance[st]= variance[st] + list(np.repeat(np.sum(np.multiply(s['con_coefficients'],1.0/np.array(s['p_exponents']))),sf))
+                else:
+                    indices[st] = list(range(c,c+sf))
+                    variance[st] = list(np.repeat(np.sum(np.multiply(s['con_coefficients'],1.0/np.array(s['p_exponents']))),sf))
+                c+=sf
+
+        print(indices,variance)
+
+        for iboys,boys_orb in enumerate(gs_electronic_structure['localized_coefficients']['alpha']):
+            w={}
+            var={}
+            for st,ind in indices.items():
+                #print(st,ind)
+                v = np.array(list(boys_orb[i] for i in ind))
+                w[st] = np.dot(v,v)
+                var[st] = np.dot(np.abs(v),variance[st])
+            print(iboys,w,var)
