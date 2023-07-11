@@ -36,6 +36,7 @@ class Qchem_mbxas():
                  run_calc       = True,
                  use_mpi        = False, # somewhat MPI is not working atm
                  use_boys       = True, # use Boys localization or not
+                 save_all       = False,
                  ):
 
         # initialize environment (set env variables)
@@ -50,6 +51,7 @@ class Qchem_mbxas():
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
         self.__print_fchk = print_fchk
         self.__use_boys   = use_boys
+        self.__save_all     = save_all
         # delete scratch earlier if not XCH calc
         self.__is_xch = True if xch_occ is not None else False
 
@@ -63,6 +65,7 @@ class Qchem_mbxas():
 
         # initialize empty stuff
         self.output = {}
+        self.data   = {}
 
         # run MBXAS calculation
         if run_calc:
@@ -77,7 +80,6 @@ class Qchem_mbxas():
         gs_output, gs_data = self.run_ground_state()
 
         # run FCH
-
         scf_guess = gs_data["localized_coefficients"] if self.__use_boys else gs_data["coefficients"]
 
         fch_output, fch_data  = self.run_fch(scf_guess) #TODO change only if Boys
@@ -113,6 +115,8 @@ class Qchem_mbxas():
 
         # store output
         self.output["gs"] = gs_output
+        if self.__save_all:
+            self.data["gs"] = gs_data
 
         # do boys postprocessing to understand orbital occupations
         self.__boys_postprocess(gs_data)
@@ -148,6 +152,8 @@ class Qchem_mbxas():
 
         # store output
         self.output["fch"] = fch_output
+        if self.__save_all:
+            self.data["fch"] = fch_data
 
         # write input and output
         with open("qchem.input", "w") as fout:
@@ -184,6 +190,8 @@ class Qchem_mbxas():
 
         # store output
         self.output["xch"] = xch_output
+        if self.__save_all:
+            self.data["xch"] = xch_data
 
         if self.__print_fchk:
             write_to_fchk(xch_data, 'output_xch.fchk')
