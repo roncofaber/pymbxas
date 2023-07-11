@@ -48,6 +48,8 @@ class Qchem_mbxas():
         self.__sdir   = os.getcwd() if scratch_dir is None else scratch_dir
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
         self.__print_fchk = print_fchk
+        # delete scratch earlier if not XCH calc
+        self.__is_xch = True if xch_occ is not None else False
 
         # store data
         self.structure    = structure
@@ -56,9 +58,6 @@ class Qchem_mbxas():
         self.qchem_params = qchem_params
         self.fch_occ      = fch_occ
         self.xch_occ      = xch_occ
-
-        # delete scratch earlier if not XCH calc
-        self.__is_xch = True if xch_occ is not None else False
 
         # initialize empty stuff
         self.output = {}
@@ -102,7 +101,10 @@ class Qchem_mbxas():
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
 
-        print(gs_data['number_of_electrons'])
+        # obtain number of electrons #TODO make a function that stores relevant output (but not too heavy stuff)
+        self.n_alpha = gs_data["number_of_electrons"]["alpha"]
+        self.n_beta  = gs_data["number_of_electrons"]["beta"]
+        self.n_electrons = self.n_alpha + self.n_beta
 
         # store output
         self.output["gs"] = gs_output
@@ -123,14 +125,13 @@ class Qchem_mbxas():
     def run_fch(self, scf_guess=None):
 
         structure = self.structure
-        charge = self.charge
-        multiplicity = self.multiplicity
+        charge = self.charge + 1 # +1 cause we kick out one lil electron
+        multiplicity = abs(self.n_alpha - self.n_beta) + 1
         qchem_params = self.qchem_params
         fch_occ = self.fch_occ
 
         # FCH input
-        multiplicity = 2
-        fch_input = make_qchem_input(structure, charge+1, multiplicity,
+        fch_input = make_qchem_input(structure, charge, multiplicity,
                                      qchem_params, "fch", occupation=fch_occ,
                                      scf_guess=scf_guess)
 
