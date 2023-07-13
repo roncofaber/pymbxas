@@ -28,15 +28,16 @@ class Qchem_mbxas():
                  structure,
                  charge,
                  multiplicity,
-                 qchem_params   = None,
-                 fch_occ        = None,
-                 xch_occ        = None,
-                 scratch_dir    = None,
-                 print_fchk     = False,
-                 run_calc       = True,
-                 use_mpi        = False, # somewhat MPI is not working atm
-                 use_boys       = True, # use Boys localization or not
-                 save_all       = False,
+                 qchem_params = None,
+                 excite_atom  = None,
+                 fch_occ      = None,
+                 do_xch       = True,
+                 scratch_dir  = None,
+                 print_fchk   = False,
+                 run_calc     = True,
+                 use_mpi      = False, # somewhat MPI is not working atm
+                 use_boys     = True,  # use Boys localization or not
+                 save_all     = False,
                  ):
 
         # initialize environment (set env variables)
@@ -53,15 +54,23 @@ class Qchem_mbxas():
         self.__use_boys   = use_boys
         self.__save_all     = save_all
         # delete scratch earlier if not XCH calc
-        self.__is_xch = True if xch_occ is not None else False
+        self.__is_xch = True if do_xch is not None else False
+        self.__ran_GS = False
+
+        # check excite atom and modify accord.
+        if isinstance(excite_atom, int):
+            excite_atom = {
+                "index"   : excite_atom,
+                "channel" : "beta"
+                }
 
         # store data
         self.structure    = structure
         self.charge       = charge
         self.multiplicity = multiplicity
         self.qchem_params = qchem_params
+        self.excite_atom  = excite_atom
         self.fch_occ      = fch_occ
-        self.xch_occ      = xch_occ
 
         # initialize empty stuff
         self.output = {}
@@ -93,8 +102,8 @@ class Qchem_mbxas():
     # run the GS calculation
     def run_ground_state(self):
 
-        structure = self.structure
-        charge = self.charge
+        structure    = self.structure
+        charge       = self.charge
         multiplicity = self.multiplicity
         qchem_params = self.qchem_params
 
@@ -108,7 +117,8 @@ class Qchem_mbxas():
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
 
-        # obtain number of electrons #TODO make a function that stores relevant output (but not too heavy stuff)
+        # obtain number of electrons
+        #TODO make a function that stores relevant output (but not too heavy stuff)
         self.n_alpha = gs_data["number_of_electrons"]["alpha"]
         self.n_beta  = gs_data["number_of_electrons"]["beta"]
         self.n_electrons = self.n_alpha + self.n_beta
@@ -120,19 +130,35 @@ class Qchem_mbxas():
 
         # do boys postprocessing to understand orbital occupations
         if self.__use_boys:
-            self.__boys_postprocess(gs_data)
+            self.s_orbitals = self.__boys_postprocess(gs_data)
 
-        # write output file #TODO change in the future to be more flexible
+            to_eject = self.s_orbitals[self.excite_atom["channel"]][self.excite_atom["index"]]
+
+            # overwrite occupation
+            if self.fch_occ is None:
+                self.fch_occ = {
+                    "nelectrons" : self.n_alpha,
+                    "eject"      : to_eject + 1,
+                    "channel"    : self.excite_atom["channel"]
+                    }
+
+        # write output file
+        #TODO change in the future to be more flexible
         with open("qchem.output", "w") as fout:
             fout.write(gs_output)
 
         if self.__print_fchk:
             write_to_fchk(gs_data, 'output_gs.fchk')
 
+        # mark that GS has been run
+        self.__ran_GS = True
+
         return gs_output, gs_data
 
     # run the FCH calculation
     def run_fch(self, scf_guess=None):
+
+        assert self.__ran_GS, "Please run a GS calculation first."
 
         structure = self.structure
         charge = self.charge + 1 # +1 cause we kick out one lil electron
@@ -172,11 +198,20 @@ class Qchem_mbxas():
     # run the XCH calculation
     def run_xch(self, scf_guess=None):
 
+        assert self.__ran_GS, "Please run a GS calculation first."
+
         structure = self.structure
         charge = self.charge
         multiplicity = self.multiplicity
         qchem_params = self.qchem_params
-        xch_occ = self.xch_occ
+
+        # xch occupation is always the same
+        xch_occ = {
+            "nelectrons" : self.n_alpha,
+            "eject"      : self.n_alpha,
+            "inject"     : self.n_alpha + 1, #nelec + 1
+            "channel"    : self.fch_occ["channel"],
+            }
 
         # XCH input
         xch_input = make_qchem_input(structure, charge, multiplicity,
@@ -209,69 +244,59 @@ class Qchem_mbxas():
     # do Boys postprocessing
     def __boys_postprocess(self, gs_electronic_structure):
 
-        symbols = self.structure.get_chemical_symbols()
+        # get basis set information
+        atom_coeffs, atom_labels, symbols, nbasis = self.__get_basis_set_info(
+            gs_electronic_structure['basis'])
 
+        s_orbitals = {}
+        # iterate over channels and find 1s orbitals
+        for channel in ["alpha", "beta"]:
 
-        atom_coeffs=[]
-        satom=0
-        for i,a in enumerate(gs_electronic_structure['basis']['atoms']):
-            print(a['symbol'],a['atomic_number'])
-            istart=satom
-            for s in a['shells']:
-                #print(s)
-                #print(s['functions'])
-                satom+=s['functions']
-            atom_coeffs.append(slice(istart,satom))
-            print('atom_coeffs',atom_coeffs[i])
+            boys_coeff = np.array(
+                gs_electronic_structure["localized_coefficients"][channel])
 
-        # loop over atoms
-        num_1s_cores = len([atom for atom in symbols if atom!='H']) #TODO num of cores function (from atom number)
+            s1_list = self.__find_1s_orbitals(boys_coeff, atom_coeffs, atom_labels, symbols)
 
-        atom_boys_alpha=[]
-        atom_boys_beta=[]
-        core_orbital_of_atom={'alpha':{}, 'beta':{}}
-        core_orbital_alpha_of_atom={}
-        core_orbital_beta_of_atom={}
-        for iorb in range(num_1s_cores): #TODO fix this (WRONG)
-            # where is Boys orbital i localized?
-            boys_orb = gs_electronic_structure['localized_coefficients']['alpha'][iorb]
-            atom_weight=[]
-            for iatom,atom in enumerate(gs_electronic_structure['basis']['atoms']):
-                atom_weight.append(np.sum([bo*bo for bo in boys_orb[atom_coeffs[iatom]]]))
-            iatom=np.argmax(atom_weight)
-            atom_boys_alpha.append([iatom,symbols[iatom]])
-            core_orbital_alpha_of_atom[iatom] = iorb
-            core_orbital_of_atom['alpha'][iatom] = iorb
-            print('Boys alpha orbital',iorb,'localized on atom',atom_boys_alpha[iorb])
+            s_orbitals[channel] = s1_list
 
-            # Now beta
-            boys_orb = gs_electronic_structure['localized_coefficients']['beta'][iorb]
-            atom_weight=[]
-            for iatom,atom in enumerate(gs_electronic_structure['basis']['atoms']):
-                atom_weight.append(np.sum([bo*bo for bo in boys_orb[atom_coeffs[iatom]]]))
-            iatom=np.argmax(atom_weight)
-            atom_boys_beta.append([iatom,symbols[iatom]])
-            core_orbital_beta_of_atom[iatom] = iorb
-            core_orbital_of_atom['beta'][iatom] = iorb
-            print('Boys  beta orbital',iorb,'localized on atom',atom_boys_beta[iorb])
+        return s_orbitals
 
-        # Build occupied orbital list
-        nalpha=gs_electronic_structure['number_of_electrons']['alpha']
-        nbeta=gs_electronic_structure['number_of_electrons']['beta']
-        gs_orblist={'alpha':[str(i+1) for i in range(nalpha)],
-                    'beta' :[str(i+1) for i in range(nbeta)]}
-        print(" ".join(gs_orblist['alpha'])+"\n"+" ".join(gs_orblist['beta']))
+    @staticmethod
+    def __get_basis_set_info(basis):
+        atom_coeffs = []
+        atom_labels = []
+        symbols     = []
+        nbasis = 0
+        for cc, atom in enumerate(basis['atoms']):
+            istart = nbasis
+            atom_label = []
+            for shell in atom['shells']:
+                nbasis += shell['functions']
+                atom_label.extend(shell['functions']*[shell['shell_type']])
 
-        occupations=[]
-        for iatom,atom in enumerate(symbols):
-            if(atom=='H'): continue
-            for ch in gs_orblist.keys():
-                if(ch=='alpha'): continue # only excite beta - is this a requirement that Nalpha>Nbeta?
-                ix=core_orbital_of_atom[ch][iatom]
-                print('core exciting',atom,'1s of atom',iatom,'in channel',ch,'( orbital',ix+1,')')
-                orblist=gs_orblist.copy()
-                orblist['alpha']=gs_orblist['alpha'].copy()
-                orblist['beta']=gs_orblist['beta'].copy()
-                del orblist[ch][ix]
-                occupations.append(" ".join(orblist['alpha'])+"\n"+" ".join(orblist['beta']))
-                print(occupations[-1])
+            atom_coeffs.append(np.array(range(istart, nbasis)))
+            atom_labels.append(np.array(atom_label))
+            symbols.append(atom["symbol"])
+
+        return atom_coeffs, atom_labels, symbols, nbasis
+
+    @staticmethod
+    def __find_1s_orbitals(boys_coeff, atom_coeffs, atom_labels, symbols):
+
+        symbol_list = np.concatenate([[cc]*len(atom_coeffs[cc]) for cc in range(len(symbols))])
+        labels_list = np.concatenate(atom_labels)
+        dominant_atoms = np.argmax(np.abs(boys_coeff), axis=1)
+
+        orb_types   = labels_list[dominant_atoms]
+        orb_symbols = symbol_list[dominant_atoms]
+
+        found_elements = []
+        s1_list = [None]*len(symbols)
+        for idx, (orb_typ, orb_id) in enumerate(zip(orb_types, orb_symbols)):
+
+            if orb_typ == "s" and orb_id not in found_elements:
+                found_elements.append(orb_id)
+                s1_list[orb_id] = idx
+                # print("The 1s of {}-{} is {}".format(symbols[orb_id], orb_id, idx))
+
+        return s1_list
