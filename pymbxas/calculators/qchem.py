@@ -8,6 +8,8 @@ Created on Fri Jul  7 12:28:13 2023
 
 import os
 
+import time
+
 # good ol' numpy
 import numpy as np
 
@@ -33,6 +35,7 @@ class Qchem_mbxas():
                  qchem_params = None,
                  excitation   = None,
                  do_xch       = True,
+                 target_dir   = None,
                  scratch_dir  = None,
                  print_fchk   = False,
                  run_calc     = True,
@@ -41,21 +44,33 @@ class Qchem_mbxas():
                  save_all     = False,
                  ):
 
-        # initialize environment (set env variables)
-        pymbxas.utils.environment.set_qchem_environment()
-
         # set up internal variables
         self.__is_mpi = use_mpi
         self.__nprocs = os.cpu_count()
         self.__pid    = os.getpid()
-        self.__cdir   = os.getcwd()
-        self.__sdir   = os.getcwd() if scratch_dir is None else scratch_dir
-        self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
+
+        # store directories and path
+        self.__cdir = os.getcwd() # current directory
+        self.__tdir = os.getcwd() if target_dir is None \
+            else os.path.abspath(target_dir) # target directory
+        self.__sdir = self.__tdir if scratch_dir is None else scratch_dir # scratch directory
+        self.__wdir = "{}/pyqchem_{}/".format(self.__sdir, self.__pid) # PyQCHEM work directory
+
+        if not os.path.exists(self.__tdir):
+            os.makedirs(self.__tdir)
+
+        # initialize environment (set env variables)
+        pymbxas.utils.environment.set_qchem_environment(self.__sdir)
+
+        # verbose and printing
         self.__print_fchk = print_fchk
-        self.__use_boys   = use_boys
         self.__save_all   = save_all
-        # delete scratch earlier if not XCH calc
+
+        # calculation details
+        self.__use_boys   = use_boys
         self.__is_xch = do_xch
+
+        # check (#TODO in future allow to restart from a GS calculation)
         self.__ran_GS = False
 
         # store data
@@ -78,17 +93,41 @@ class Qchem_mbxas():
     # Function to run all calc (GS, FCH, XCH) in sequence
     def run_all_calculations(self):
 
+        start_time  = time.time()
+
         # run ground state
+        print("Running ground state calculation.")
         gs_output, gs_data = self.run_ground_state()
 
+        gs_time = time.time() - start_time
+
+        print("Ground state calculation finished in {:.2f} s.".format(gs_time))
+
+        print("Running excited state (FCH) calculation with {} orbitals as guess.".format(
+            ["KS", "Boys"][self.__use_boys]))
+        print("Exciting orbital #{}.".format(self.excitation["eject"]))
         # run FCH
         scf_guess = gs_data["localized_coefficients"] if self.__use_boys else gs_data["coefficients"]
-
         fch_output, fch_data  = self.run_fch(scf_guess) #TODO change only if Boys
 
+        fch_time = time.time() - gs_time - start_time
+        print("Excited state (FCH) calculation finished in {:.2f} s.".format(fch_time))
+
         # only run XCH if there is input
+        xch_time = None,
         if self.__is_xch:
+            print("Running excited state (XCH) calculation for energy alignment.")
             xch_output, xch_data = self.run_xch(fch_data["coefficients"])
+
+            xch_time = time.time() - fch_time - gs_time - start_time
+
+            print("Excited state (XCH) calculation finished in {:.2f} s.".format(xch_time))
+
+        self.timings = {
+            "gs"  : gs_time,
+            "fch" : fch_time,
+            "xch" : xch_time
+            }
 
         return
 
@@ -137,11 +176,11 @@ class Qchem_mbxas():
 
         # write output file
         #TODO change in the future to be more flexible
-        with open("qchem.output", "w") as fout:
+        with open(self.__tdir + "/qchem.output", "w") as fout:
             fout.write(gs_output)
 
         if self.__print_fchk:
-            write_to_fchk(gs_data, 'output_gs.fchk')
+            write_to_fchk(gs_data, self.__tdir + "/output_gs.fchk")
 
         # mark that GS has been run
         self.__ran_GS = True
@@ -177,15 +216,15 @@ class Qchem_mbxas():
             self.data["fch"] = fch_data
 
         # write input and output
-        with open("qchem.input", "w") as fout:
+        with open(self.__tdir + "/qchem.input", "w") as fout:
             fout.write(fch_input.get_txt())
-        with open("qchem.output", "a") as fout:
+        with open(self.__tdir + "/qchem.output", "a") as fout:
             fout.write(fch_output)
         # copy MOM files in relevant directory
-        copy_output_files(self.__wdir, self.__cdir)
+        copy_output_files(self.__wdir, self.__tdir)
 
         if self.__print_fchk:
-            write_to_fchk(fch_data, 'output_fch.fchk')
+            write_to_fchk(fch_data, self.__tdir + "/output_fch.fchk")
 
         # calculate overlap if using BOYS
         if self.__use_boys:
@@ -196,7 +235,8 @@ class Qchem_mbxas():
 
             # overwrite files
             for channel, overlap in self.boys_overlap.items():
-                np.savetxt("{}_ovlp_gs_es.txt".format(channel), overlap)
+                np.savetxt(self.__tdir + "/{}_ovlp_gs_es.txt".format(
+                    channel), overlap)
 
         return fch_output, fch_data
 
@@ -238,13 +278,16 @@ class Qchem_mbxas():
             self.data["xch"] = xch_data
 
         if self.__print_fchk:
-            write_to_fchk(xch_data, 'output_xch.fchk')
+            write_to_fchk(xch_data, self.__tdir + "/output_xch.fchk")
 
         # generate AlignDir directory #TODO change for more flex
-        os.mkdir("AlignDir")
+        try:
+            os.mkdir(self.__tdir + "/AlignDir")
+        except OSError:
+            pass
 
         # write XCH output file
-        with open("AlignDir/align_calc.out", "w") as fout:
+        with open(self.__tdir + "/AlignDir/align_calc.out", "w") as fout:
             fout.write(xch_output)
 
         return xch_output, xch_data
