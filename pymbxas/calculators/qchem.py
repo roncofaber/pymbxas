@@ -13,8 +13,10 @@ import numpy as np
 
 # self module utilities
 import pymbxas
+import pymbxas.utils.check_keywords as check
 from pymbxas.io.copy import copy_output_files
 from pymbxas.build.input import make_qchem_input
+from pymbxas.utils.boys import find_1s_orbitals, calculate_boys_overlap
 
 # pyqchem stuff
 from pyqchem import get_output_from_qchem
@@ -29,8 +31,7 @@ class Qchem_mbxas():
                  charge,
                  multiplicity,
                  qchem_params = None,
-                 excite_atom  = None,
-                 fch_occ      = None,
+                 excitation   = None,
                  do_xch       = True,
                  scratch_dir  = None,
                  print_fchk   = False,
@@ -52,25 +53,17 @@ class Qchem_mbxas():
         self.__wdir   = "{}/pyqchem_{}/".format(os.getcwd(), self.__pid)
         self.__print_fchk = print_fchk
         self.__use_boys   = use_boys
-        self.__save_all     = save_all
+        self.__save_all   = save_all
         # delete scratch earlier if not XCH calc
-        self.__is_xch = True if do_xch is not None else False
+        self.__is_xch = do_xch
         self.__ran_GS = False
-
-        # check excite atom and modify accord.
-        if isinstance(excite_atom, int):
-            excite_atom = {
-                "index"   : excite_atom,
-                "channel" : "beta"
-                }
 
         # store data
         self.structure    = structure
         self.charge       = charge
         self.multiplicity = multiplicity
         self.qchem_params = qchem_params
-        self.excite_atom  = excite_atom
-        self.fch_occ      = fch_occ
+        self.excitation   = check.determine_excitation(excitation)
 
         # initialize empty stuff
         self.output = {}
@@ -123,24 +116,24 @@ class Qchem_mbxas():
         self.n_beta  = gs_data["number_of_electrons"]["beta"]
         self.n_electrons = self.n_alpha + self.n_beta
 
+        # update with correct number of electrons
+        self.excitation["nelectrons"] = [self.n_alpha, self.n_beta]
+
         # store output
         self.output["gs"] = gs_output
+        self.basis_overlap = gs_data["overlap"]
         if self.__save_all:
             self.data["gs"] = gs_data
 
         # do boys postprocessing to understand orbital occupations
         if self.__use_boys:
-            self.s_orbitals = self.__boys_postprocess(gs_data)
-
-            to_eject = self.s_orbitals[self.excite_atom["channel"]][self.excite_atom["index"]]
-
-            # overwrite occupation
-            if self.fch_occ is None:
-                self.fch_occ = {
-                    "nelectrons" : self.n_alpha,
-                    "eject"      : to_eject + 1,
-                    "channel"    : self.excite_atom["channel"]
-                    }
+            self.boys_coeffs = gs_data["localized_coefficients"]
+            self.s_orbitals  = find_1s_orbitals(gs_data)
+            # overwrite occupation if it's not been specified
+            if not self.excitation["eject"]:
+                to_eject = self.s_orbitals[
+                    self.excitation["channel"]][self.excitation["ato_idx"]]
+                self.excitation["eject"] = to_eject + 1
 
         # write output file
         #TODO change in the future to be more flexible
@@ -160,16 +153,17 @@ class Qchem_mbxas():
 
         assert self.__ran_GS, "Please run a GS calculation first."
 
-        structure = self.structure
-        charge = self.charge + 1 # +1 cause we kick out one lil electron
+        structure    = self.structure
+        charge       = self.charge + 1 # +1 cause we kick out one lil electron
         multiplicity = abs(self.n_alpha - self.n_beta - 1) + 1
         qchem_params = self.qchem_params
-        fch_occ = self.fch_occ
+        excitation   = self.excitation
 
         # FCH input
         fch_input = make_qchem_input(structure, charge, multiplicity,
-                                     qchem_params, "fch", occupation=fch_occ,
-                                     scf_guess=scf_guess)
+                                     qchem_params, "fch",
+                                     occupation = excitation,
+                                     scf_guess  = scf_guess)
 
         # run calculation
         fch_output, fch_data = get_output_from_qchem(
@@ -193,6 +187,17 @@ class Qchem_mbxas():
         if self.__print_fchk:
             write_to_fchk(fch_data, 'output_fch.fchk')
 
+        # calculate overlap if using BOYS
+        if self.__use_boys:
+
+            self.boys_overlap = calculate_boys_overlap(self.boys_coeffs,
+                                                       fch_data["coefficients"],
+                                                       self.basis_overlap)
+
+            # overwrite files
+            for channel, overlap in self.boys_overlap.items():
+                np.savetxt("{}_ovlp_gs_es.txt".format(channel), overlap)
+
         return fch_output, fch_data
 
     # run the XCH calculation
@@ -206,11 +211,14 @@ class Qchem_mbxas():
         qchem_params = self.qchem_params
 
         # xch occupation is always the same
+        channel = self.excitation["channel"]
+        channel_idx = 0 if  channel == "alpha" else 1
+        nelec = [self.n_alpha, self.n_beta][channel_idx]
         xch_occ = {
-            "nelectrons" : self.n_alpha,
-            "eject"      : self.n_alpha,
-            "inject"     : self.n_alpha + 1, #nelec + 1
-            "channel"    : self.fch_occ["channel"],
+            "nelectrons" : [self.n_alpha, self.n_beta],
+            "eject"      : nelec,
+            "inject"     : nelec + 1, #nelec + 1
+            "channel"    : channel,
             }
 
         # XCH input
@@ -240,63 +248,3 @@ class Qchem_mbxas():
             fout.write(xch_output)
 
         return xch_output, xch_data
-
-    # do Boys postprocessing
-    def __boys_postprocess(self, gs_electronic_structure):
-
-        # get basis set information
-        atom_coeffs, atom_labels, symbols, nbasis = self.__get_basis_set_info(
-            gs_electronic_structure['basis'])
-
-        s_orbitals = {}
-        # iterate over channels and find 1s orbitals
-        for channel in ["alpha", "beta"]:
-
-            boys_coeff = np.array(
-                gs_electronic_structure["localized_coefficients"][channel])
-
-            s1_list = self.__find_1s_orbitals(boys_coeff, atom_coeffs, atom_labels, symbols)
-
-            s_orbitals[channel] = s1_list
-
-        return s_orbitals
-
-    @staticmethod
-    def __get_basis_set_info(basis):
-        atom_coeffs = []
-        atom_labels = []
-        symbols     = []
-        nbasis = 0
-        for cc, atom in enumerate(basis['atoms']):
-            istart = nbasis
-            atom_label = []
-            for shell in atom['shells']:
-                nbasis += shell['functions']
-                atom_label.extend(shell['functions']*[shell['shell_type']])
-
-            atom_coeffs.append(np.array(range(istart, nbasis)))
-            atom_labels.append(np.array(atom_label))
-            symbols.append(atom["symbol"])
-
-        return atom_coeffs, atom_labels, symbols, nbasis
-
-    @staticmethod
-    def __find_1s_orbitals(boys_coeff, atom_coeffs, atom_labels, symbols):
-
-        symbol_list = np.concatenate([[cc]*len(atom_coeffs[cc]) for cc in range(len(symbols))])
-        labels_list = np.concatenate(atom_labels)
-        dominant_atoms = np.argmax(np.abs(boys_coeff), axis=1)
-
-        orb_types   = labels_list[dominant_atoms]
-        orb_symbols = symbol_list[dominant_atoms]
-
-        found_elements = []
-        s1_list = [None]*len(symbols)
-        for idx, (orb_typ, orb_id) in enumerate(zip(orb_types, orb_symbols)):
-
-            if orb_typ == "s" and orb_id not in found_elements:
-                found_elements.append(orb_id)
-                s1_list[orb_id] = idx
-                # print("The 1s of {}-{} is {}".format(symbols[orb_id], orb_id, idx))
-
-        return s1_list

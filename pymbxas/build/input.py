@@ -53,7 +53,9 @@ def make_qchem_input(molecule, charge, multiplicity,
         qchem_params.update(gs_def_params)
     elif calc_type in ["fch", "xch"]:
         qchem_params.update(xas_def_params)
-    qchem_params["scf_guess"] = scf_guess
+
+    if scf_guess is not None:
+        qchem_params["scf_guess"] = scf_guess
 
     # add extra sections if nonexistend #TODO can be cleaner code
     if "extra_sections" not in qchem_params:
@@ -62,9 +64,8 @@ def make_qchem_input(molecule, charge, multiplicity,
     # check occupation if needed
     if occupation is not None:
         # check occupation format
-        occupation = determine_occupation(occupation)
         occ_section = CustomSection(title='occupied',
-                                    keywords={' ' : occupation})
+                                    keywords={' ' : determine_occupation(occupation)})
 
         if isinstance(qchem_params["extra_sections"], list):
             qchem_params["extra_sections"].append(occ_section)
