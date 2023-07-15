@@ -31,7 +31,7 @@ def find_1s_in_channel(boys_coeff, atom_coeffs, atom_labels, symbols):
     return s1_list
 
 # find the 1s orbitals of the system
-def find_1s_orbitals(gs_data):
+def find_1s_orbitals(gs_data, use_localized=False):
 
     # get basis set information
     atom_coeffs, atom_labels, symbols, nbasis = get_basis_set_info(gs_data['basis'])
@@ -40,10 +40,13 @@ def find_1s_orbitals(gs_data):
     # iterate over channels and find 1s orbitals
     for channel in ["alpha", "beta"]:
 
-        boys_coeff = np.array(gs_data["localized_coefficients"][channel])
+        if use_localized:
+            orb_coeff = np.array(gs_data["localized_coefficients"][channel])
+        else:
+            orb_coeff = np.array(gs_data["coefficients"][channel])
 
         # calculate which ones are the 1s orbitals
-        s1_list = find_1s_in_channel(boys_coeff, atom_coeffs, atom_labels, symbols)
+        s1_list = find_1s_in_channel(orb_coeff, atom_coeffs, atom_labels, symbols)
         s_orbitals[channel] = s1_list
 
     return s_orbitals

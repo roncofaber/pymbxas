@@ -167,12 +167,14 @@ class Qchem_mbxas():
         # do boys postprocessing to understand orbital occupations
         if self.__use_boys:
             self.boys_coeffs = gs_data["localized_coefficients"]
-            self.s_orbitals  = find_1s_orbitals(gs_data)
-            # overwrite occupation if it's not been specified
-            if not self.excitation["eject"]:
-                to_eject = self.s_orbitals[
-                    self.excitation["channel"]][self.excitation["ato_idx"]]
-                self.excitation["eject"] = to_eject + 1
+
+        # find 1s orbitals
+        self.s_orbitals  = find_1s_orbitals(gs_data, use_localized=self.__use_boys)
+        # overwrite occupation if it's not been specified
+        if not self.excitation["eject"]:
+            to_eject = self.s_orbitals[
+                self.excitation["channel"]][self.excitation["ato_idx"]]
+            self.excitation["eject"] = to_eject + 1
 
         # write output file
         #TODO change in the future to be more flexible
