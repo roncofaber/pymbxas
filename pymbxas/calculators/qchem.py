@@ -7,7 +7,7 @@ Created on Fri Jul  7 12:28:13 2023
 """
 
 import os
-
+import dill
 import time
 
 # good ol' numpy
@@ -18,7 +18,9 @@ import pymbxas
 import pymbxas.utils.check_keywords as check
 from pymbxas.io.copy import copy_output_files
 from pymbxas.build.input import make_qchem_input
-from pymbxas.utils.boys import find_1s_orbitals, calculate_boys_overlap
+from pymbxas.utils.orbitals import find_1s_orbitals, calculate_boys_overlap
+from pymbxas.utils.environment import set_qchem_environment, get_qchem_version_from_output
+from pymbxas.utils.basis import get_basis_set_info
 
 # pyqchem stuff
 from pyqchem import get_output_from_qchem
@@ -29,9 +31,10 @@ from pyqchem.file_io import write_to_fchk
 class Qchem_mbxas():
 
     def __init__(self,
-                 structure,
-                 charge,
-                 multiplicity,
+                 structure    = None,
+                 charge       = None,
+                 multiplicity = None,
+                 pkl_file     = None,
                  qchem_params = None,
                  excitation   = None,
                  do_xch       = True,
@@ -41,8 +44,16 @@ class Qchem_mbxas():
                  run_calc     = True,
                  use_mpi      = False, # somewhat MPI is not working atm
                  use_boys     = True,  # use Boys localization or not
-                 save_all     = False,
+                 save         = True,  # save object as pkl file
+                 save_all     = False, # save all fchk output in the pkl
+                 save_name    = "mbxas_obj.pkl", # name of saved file
+                 save_path    = None, # path of saved object
+                 keep_scratch = False,
                  ):
+
+        # restart object from a pkl file
+        if pkl_file is not None:
+            self.__restart_from_pickle(pkl_file)
 
         # set up internal variables
         self.__is_mpi = use_mpi
@@ -60,15 +71,30 @@ class Qchem_mbxas():
             os.makedirs(self.__tdir)
 
         # initialize environment (set env variables)
-        pymbxas.utils.environment.set_qchem_environment(self.__sdir)
+        set_qchem_environment(self.__sdir)
 
-        # verbose and printing
-        self.__print_fchk = print_fchk
-        self.__save_all   = save_all
+        if pkl_file is None:
+            self.__initialize_from_scratch(structure, charge, multiplicity,
+                                           qchem_params, excitation, use_boys,
+                                           do_xch, print_fchk, save, save_name,
+                                           save_path, save_all, keep_scratch,
+                                           run_calc)
+
+        return
+
+    def __initialize_from_scratch(self, structure, charge, multiplicity,
+                                  qchem_params, excitation, use_boys, do_xch,
+                                  print_fchk, save, save_name, save_path,
+                                  save_all, keep_scratch, run_calc):
 
         # calculation details
         self.__use_boys   = use_boys
         self.__is_xch = do_xch
+
+        # output, verbose and printing
+        self.__print_fchk = print_fchk
+        self.__save_all = save_all
+        self.__keep_scratch = keep_scratch
 
         # check (#TODO in future allow to restart from a GS calculation)
         self.__ran_GS = False
@@ -88,40 +114,57 @@ class Qchem_mbxas():
         if run_calc:
             self.run_all_calculations()
 
+        if save:
+            self.save_object(save_name, save_path)
+
+        return
+
+    # restart object from pkl file previously saved
+    def __restart_from_pickle(self, pkl_file):
+
+        # open previously generated gpw file
+        with open(pkl_file, "rb") as fin:
+            restart = dill.load(fin)
+
+        self.__dict__ = restart.__dict__.copy()
+
         return
 
     # Function to run all calc (GS, FCH, XCH) in sequence
     def run_all_calculations(self):
 
+        print(">>> Starting PyMBXAS <<<")
+
         start_time  = time.time()
 
         # run ground state
-        print("Running ground state calculation.")
+        # print("Running ground state calculation.")
         gs_output, gs_data = self.run_ground_state()
 
         gs_time = time.time() - start_time
 
-        print("Ground state calculation finished in {:.2f} s.".format(gs_time))
+        print("> Ground state calculation finished in {:.2f} s.".format(gs_time))
 
-        print("Running excited state (FCH) calculation with {} orbitals as guess.".format(
-            ["KS", "Boys"][self.__use_boys]))
-        print("Exciting orbital #{}.".format(self.excitation["eject"]))
+        # print("Running excited state (FCH) calculation with {} orbitals as guess.".format(
+            # ["KS", "Boys"][self.__use_boys]))
+        print("> Exciting orbital #{} - {} orbs.".format(self.excitation["eject"],
+                                                    ["KS", "Boys"][self.__use_boys]))
         # run FCH
         scf_guess = gs_data["localized_coefficients"] if self.__use_boys else gs_data["coefficients"]
         fch_output, fch_data  = self.run_fch(scf_guess) #TODO change only if Boys
 
         fch_time = time.time() - gs_time - start_time
-        print("Excited state (FCH) calculation finished in {:.2f} s.".format(fch_time))
+        print("> Excited state (FCH) calculation finished in {:.2f} s.".format(fch_time))
 
         # only run XCH if there is input
         xch_time = None,
         if self.__is_xch:
-            print("Running excited state (XCH) calculation for energy alignment.")
+            # print("Running excited state (XCH) calculation for energy alignment.")
             xch_output, xch_data = self.run_xch(fch_data["coefficients"])
 
             xch_time = time.time() - fch_time - gs_time - start_time
 
-            print("Excited state (XCH) calculation finished in {:.2f} s.".format(xch_time))
+            print("> Excited state (XCH) calculation finished in {:.2f} s.".format(xch_time))
 
         self.timings = {
             "gs"  : gs_time,
@@ -129,11 +172,19 @@ class Qchem_mbxas():
             "xch" : xch_time
             }
 
+        print(">>> PyMBXAS finished successfully! <<<\n")
+
         return
 
     # run the GS calculation
     def run_ground_state(self):
 
+        # check if GS was already performed, if so: skip
+        if self.__ran_GS:
+            print("GS already ran with this configuration. Skipping.")
+            return self.output["gs"], self.data["gs"]
+
+        # get system settings
         structure    = self.structure
         charge       = self.charge
         multiplicity = self.multiplicity
@@ -141,13 +192,27 @@ class Qchem_mbxas():
 
         # GS input
         gs_input = make_qchem_input(structure, charge, multiplicity,
-                             qchem_params, "gs", occupation = None)
+                             qchem_params, "gs", occupation = None,
+                             use_boys=self.__use_boys)
 
         # run calculation
         gs_output, gs_data = get_output_from_qchem(
             gs_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
+
+        # read basis set information and store them
+        atom_coeffs, atom_labels, symbols, nbasis, indexing = get_basis_set_info(gs_data["basis"])
+        self.basis = {
+            "atom_coefficients" : atom_coeffs,
+            "atom_labels"       : atom_labels,
+            "symbols"           : symbols,
+            "nbasis"            : nbasis,
+            "indexing"          : indexing,
+            }
+
+        # old version, loc coeff need to be swapped and override qchem_order
+        gs_data = self.__check_basis_indexing(gs_data, gs_output, self.basis["indexing"])
 
         # obtain number of electrons
         #TODO make a function that stores relevant output (but not too heavy stuff)
@@ -210,7 +275,10 @@ class Qchem_mbxas():
         fch_output, fch_data = get_output_from_qchem(
             fch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
-            delete_scratch = not self.__is_xch)
+            delete_scratch = not (self.__is_xch or self.__keep_scratch))
+
+        # old version, loc coeff need to be swapped and override qchem_order
+        fch_data = self.__check_basis_indexing(fch_data, fch_output, self.basis["indexing"])
 
         # store output
         self.output["fch"] = fch_output
@@ -272,7 +340,10 @@ class Qchem_mbxas():
         xch_output, xch_data = get_output_from_qchem(
             xch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
-            delete_scratch = self.__is_xch)
+            delete_scratch = not self.__keep_scratch)
+
+        # old version, loc coeff need to be swapped and override qchem_order
+        xch_data = self.__check_basis_indexing(xch_data, xch_output, self.basis["indexing"])
 
         # store output
         self.output["xch"] = xch_output
@@ -293,3 +364,48 @@ class Qchem_mbxas():
             fout.write(xch_output)
 
         return xch_output, xch_data
+
+    @staticmethod
+    def __check_basis_indexing(data, output, indices):
+
+        # override ordering to be consistent (53.0 can be overwritten by Boys)
+        data["coefficients"]["qchem_order"] = indices
+
+        if "localized_coefficients" not in data:
+            return data
+
+        data["localized_coefficients"]["qchem_order"] = indices
+
+        if get_qchem_version_from_output(output) < 6:
+
+            reverse_indices = [list(indices).index(j) for j in range(len(indices))]
+
+            for channel in ["alpha", "beta"]:
+                data['localized_coefficients'][channel] = \
+                    np.array(data['localized_coefficients'][channel])[:, reverse_indices].tolist()
+
+            data['localized_coefficients']["qchem_order"] = indices
+
+        return data
+
+    # save object as pkl file
+    def save_object(self, oname=None, save_path=None):
+
+        if oname is None:
+            oname = self.savename
+
+        if save_path is None:
+            path = self.__tdir
+        else:
+            path = save_path
+
+        if oname.endswith(".pkl"):
+            oname =  path + "/" + oname
+        else:
+            oname = path + "/" + oname.split(".")[-1] + ".pkl"
+
+        with open(oname, 'wb') as fout:
+            dill.dump(self, fout)
+
+        print("Saved everything as {}".format(oname))
+        return

@@ -5,6 +5,8 @@ Created on Thu Jun 29 10:08:26 2023
 
 @author: roncoroni
 """
+import copy
+import collections
 
 from pyqchem import Structure, QchemInput
 from pyqchem.qc_input import CustomSection
@@ -14,8 +16,7 @@ from pymbxas.utils.check_keywords import determine_occupation
 
 gs_def_params = {
     "extra_rem_keywords" : {"TRANS_MOM_SAVE" : True,
-                            "BOYSCALC"       : "2",
-                            # "PCM"       : "1",
+                            # "BOYSCALC"       : "2",
                             },
     }
 
@@ -29,30 +30,29 @@ xas_def_params = {
     },
     }
 
+def update(d, u):
+    for k, v in u.items():
+        if isinstance(v, collections.abc.Mapping):
+            d[k] = update(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
 
-#%%
 
-# Function to generate an input for a QCHEM calculation,
-# specify calc type to add default params needed for MBXAS
-def make_qchem_input(molecule, charge, multiplicity,
-                     qchem_params, calc_type, occupation = None,
-                     scf_guess = None):
+def update_input(qchem_params, extra_input, use_boys=False,
+                 scf_guess=None, occupation=None):
 
-    # make molecule
-    molecule_str = Structure(
-        coordinates  = molecule.get_positions(),
-        symbols      = molecule.get_chemical_symbols(),
-        charge       = charge,
-        multiplicity = multiplicity)
+    # copy input
+    qchem_params = copy.deepcopy(qchem_params)
+    extra_input  = copy.deepcopy(extra_input)
 
-    # copy parameters to not mess stuff
-    qchem_params = qchem_params.copy()
+    # update with default params
+    qchem_params = update(qchem_params, extra_input)
 
-    # update params depending on calculation
-    if calc_type == "gs":
-        qchem_params.update(gs_def_params)
-    elif calc_type in ["fch", "xch"]:
-        qchem_params.update(xas_def_params)
+    if use_boys:
+        qchem_params["extra_rem_keywords"]["BOYSCALC"] = 2
+    else:
+        qchem_params["extra_rem_keywords"]["BOYSCALC"] = 0
 
     if scf_guess is not None:
         qchem_params["scf_guess"] = scf_guess
@@ -71,6 +71,31 @@ def make_qchem_input(molecule, charge, multiplicity,
             qchem_params["extra_sections"].append(occ_section)
         else:
             qchem_params["extra_sections"] = occ_section
+
+    return qchem_params
+
+#%%
+
+# Function to generate an input for a QCHEM calculation,
+# specify calc type to add default params needed for MBXAS
+def make_qchem_input(molecule, charge, multiplicity,
+                     qchem_params, calc_type, occupation = None,
+                     scf_guess = None, use_boys=False):
+
+    # make molecule
+    molecule_str = Structure(
+        coordinates  = molecule.get_positions(),
+        symbols      = molecule.get_chemical_symbols(),
+        charge       = charge,
+        multiplicity = multiplicity)
+
+    # update params depending on calculation
+    if calc_type == "gs":
+        qchem_params = update_input(qchem_params, gs_def_params, use_boys,
+                                    scf_guess, occupation)
+    elif calc_type in ["fch", "xch"]:
+        qchem_params = update_input(qchem_params, xas_def_params, use_boys,
+                                    scf_guess, occupation)
 
     # generate input
     qchem_input = QchemInput(

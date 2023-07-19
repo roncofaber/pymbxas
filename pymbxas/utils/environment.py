@@ -10,6 +10,12 @@ import os
 from pymbxas import __qcauxdir__, __qcdir__
 #%%
 
+def get_qchem_version_from_output(output):
+    for line in output["gs"].splitlines():
+        if line.strip().startswith("Q-Chem"):
+            version = float(line.strip().split()[1])
+            return version
+
 def set_qchem_environment(scratchdir=None):
 
     # scratch in current directory if not specified
