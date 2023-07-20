@@ -1,0 +1,16 @@
+gridP = 100
+highE =  1127.5
+lowE=20
+sigma=0.3
+Gamma=0+0.3j
+do_align=False
+check_amp=True
+printsticks=True
+printspec=True
+Dodebug=False
+DoRIXS=True
+calc_abs=True
+printinteg=False
+input_file=qchem.in
+output_file=qchem.out
+printanalysis=True
