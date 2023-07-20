@@ -45,7 +45,7 @@ class Qchem_mbxas():
                  use_mpi      = False, # somewhat MPI is not working atm
                  use_boys     = True,  # use Boys localization or not
                  save         = True,  # save object as pkl file
-                 save_all     = False, # save all fchk output in the pkl
+                 save_all     = True, # save all fchk output in the pkl
                  save_name    = "mbxas_obj.pkl", # name of saved file
                  save_path    = None, # path of saved object
                  keep_scratch = False,
@@ -138,33 +138,27 @@ class Qchem_mbxas():
         start_time  = time.time()
 
         # run ground state
-        # print("Running ground state calculation.")
+        print("> Ground state calculation: ", end = "", flush=True)
         gs_output, gs_data = self.run_ground_state()
-
         gs_time = time.time() - start_time
+        print("finished in {:.2f} s.".format(gs_time))
 
-        print("> Ground state calculation finished in {:.2f} s.".format(gs_time))
-
-        # print("Running excited state (FCH) calculation with {} orbitals as guess.".format(
-            # ["KS", "Boys"][self.__use_boys]))
         print("> Exciting orbital #{} - {} orbs.".format(self.excitation["eject"],
                                                     ["KS", "Boys"][self.__use_boys]))
         # run FCH
+        print("> FCH calculation:", end = "", flush=True)
         scf_guess = gs_data["localized_coefficients"] if self.__use_boys else gs_data["coefficients"]
         fch_output, fch_data  = self.run_fch(scf_guess) #TODO change only if Boys
-
         fch_time = time.time() - gs_time - start_time
-        print("> Excited state (FCH) calculation finished in {:.2f} s.".format(fch_time))
+        print("finished in {:.2f} s.".format(fch_time))
 
         # only run XCH if there is input
         xch_time = None,
         if self.__is_xch:
-            # print("Running excited state (XCH) calculation for energy alignment.")
+            print("> XCH calculation:", end = "", flush=True)
             xch_output, xch_data = self.run_xch(fch_data["coefficients"])
-
             xch_time = time.time() - fch_time - gs_time - start_time
-
-            print("> Excited state (XCH) calculation finished in {:.2f} s.".format(xch_time))
+            print("finished in {:.2f} s.".format(xch_time))
 
         self.timings = {
             "gs"  : gs_time,

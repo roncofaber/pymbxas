@@ -11,7 +11,7 @@ from pymbxas import __qcauxdir__, __qcdir__
 #%%
 
 def get_qchem_version_from_output(output):
-    for line in output["gs"].splitlines():
+    for line in output.splitlines():
         if line.strip().startswith("Q-Chem"):
             version = float(line.strip().split()[1])
             return version

@@ -34,7 +34,7 @@ def find_1s_in_channel(boys_coeff, atom_coeffs, atom_labels, symbols):
 def find_1s_orbitals(gs_data, use_localized=False):
 
     # get basis set information
-    atom_coeffs, atom_labels, symbols, nbasis = get_basis_set_info(gs_data['basis'])
+    atom_coeffs, atom_labels, symbols, nbasis, indexing = get_basis_set_info(gs_data['basis'])
 
     s_orbitals   = {}
     # iterate over channels and find 1s orbitals
