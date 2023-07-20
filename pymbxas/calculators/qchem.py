@@ -43,7 +43,7 @@ class Qchem_mbxas():
                  do_xch       = True,
                  target_dir   = None,
                  scratch_dir  = None,
-                 print_fchk   = False,
+                 print_fchk   = True,
                  run_calc     = True,
                  use_mpi      = False, # somewhat MPI is not working atm
                  use_boys     = True,  # use Boys localization or not

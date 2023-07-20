@@ -27,6 +27,9 @@ qchem_params = {
     "jobtype"      : "sp",
     "exchange"     : "B3LYP",
     "basis"        : "def2-tzvpd",
+    "unrestricted" : True,
+    "symmetry"     : False,
+    "sym_ignore"   : True,
 }
 
 # run all calculations
@@ -36,6 +39,7 @@ obj = Qchem_mbxas(
     multiplicity,
     qchem_params = qchem_params,
     excitation   = 0, #excite 0th atom --> code automatically finds the relevant 1s orbital
+    target_dir   = "water", # specify name of target directory with save files
     )
 
 # Obtained broadened MBXAS spectra
