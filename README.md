@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from pymbxas.calculators.qchem import Qchem_mbxas
 
 # build molecule
-molecule = ase.build.molecule("C6H6")
+molecule = ase.build.molecule("H2O")
 
 # set up parameters
 charge       = 0
