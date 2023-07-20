@@ -21,10 +21,13 @@ from pymbxas.build.input import make_qchem_input
 from pymbxas.utils.orbitals import find_1s_orbitals, calculate_boys_overlap
 from pymbxas.utils.environment import set_qchem_environment, get_qchem_version_from_output
 from pymbxas.utils.basis import get_basis_set_info
+import pymbxas.CleaRIXS.read_modules as rd
+import pymbxas.CleaRIXS.rixs_modules as rx
 
 # pyqchem stuff
 from pyqchem import get_output_from_qchem
 from pyqchem.file_io import write_to_fchk
+from pyqchem.parsers.basic import basic_parser_qchem
 
 #%%
 
@@ -146,24 +149,32 @@ class Qchem_mbxas():
         print("> Exciting orbital #{} - {} orbs.".format(self.excitation["eject"],
                                                     ["KS", "Boys"][self.__use_boys]))
         # run FCH
-        print("> FCH calculation:", end = "", flush=True)
+        print("> FCH calculation: ", end = "", flush=True)
         scf_guess = gs_data["localized_coefficients"] if self.__use_boys else gs_data["coefficients"]
         fch_output, fch_data  = self.run_fch(scf_guess) #TODO change only if Boys
         fch_time = time.time() - gs_time - start_time
         print("finished in {:.2f} s.".format(fch_time))
 
+        tot_time = fch_time
         # only run XCH if there is input
         xch_time = None,
         if self.__is_xch:
-            print("> XCH calculation:", end = "", flush=True)
+            print("> XCH calculation: ", end = "", flush=True)
             xch_output, xch_data = self.run_xch(fch_data["coefficients"])
             xch_time = time.time() - fch_time - gs_time - start_time
             print("finished in {:.2f} s.".format(xch_time))
+            tot_time += xch_time
+
+        print("> MBXAS calculation: ", end = "", flush=True)
+        self.run_mbxas()
+        mbxas_time = time.time() - tot_time - gs_time - start_time
+        print("finished in {:.2f} s.".format(mbxas_time))
 
         self.timings = {
             "gs"  : gs_time,
             "fch" : fch_time,
-            "xch" : xch_time
+            "xch" : xch_time,
+            "mbxas" : mbxas_time
             }
 
         print(">>> PyMBXAS finished successfully! <<<\n")
@@ -194,6 +205,9 @@ class Qchem_mbxas():
             gs_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = False)
+
+        # parse output (#TODO in future we won't need to print the output so it can be done directly)
+        gs_data.update(basic_parser_qchem(gs_output))
 
         # read basis set information and store them
         atom_coeffs, atom_labels, symbols, nbasis, indexing = get_basis_set_info(gs_data["basis"])
@@ -271,6 +285,9 @@ class Qchem_mbxas():
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = not (self.__is_xch or self.__keep_scratch))
 
+        # parse output (#TODO in future we won't need to print the output so it can be done directly)
+        fch_data.update(basic_parser_qchem(fch_output))
+
         # old version, loc coeff need to be swapped and override qchem_order
         fch_data = self.__check_basis_indexing(fch_data, fch_output, self.basis["indexing"])
 
@@ -336,6 +353,9 @@ class Qchem_mbxas():
             return_electronic_structure = True, scratch = self.__sdir,
             delete_scratch = not self.__keep_scratch)
 
+        # parse output (#TODO in future we won't need to print the output so it can be done directly)
+        xch_data.update(basic_parser_qchem(xch_output))
+
         # old version, loc coeff need to be swapped and override qchem_order
         xch_data = self.__check_basis_indexing(xch_data, xch_output, self.basis["indexing"])
 
@@ -359,6 +379,56 @@ class Qchem_mbxas():
 
         return xch_output, xch_data
 
+    def run_mbxas(self):
+
+        # Hartree to eV
+        Ha = 27.211407953
+
+        # select excitation channel
+        channel = self.excitation["channel"]
+
+        # TODO check if this works:
+        # CI_Expansion = rd.Unres_CISreader(output_file, check_amp)
+        # E_f = []
+        # E_f.append(0)
+        # for i in CI_Expansion:
+        #  E_f.append(i[1])
+
+        # get excitation info
+        nocc = self.data["fch"]["number_of_electrons"][channel]
+        core_ind_gs = self.excitation["eject"]
+
+        # read matrices
+        full_mom_matrix, full_gs_matrix, full_ovlp_matrix = rd.read_full_matrices(
+            nocc, core_ind_gs, path=self.__tdir, channel=channel)
+
+        # read energy of unoccupied states #TODO check consistency
+        ener = self.data["fch"]["mo_energies"][channel][nocc+1:]
+
+        # align energies
+        if self.__is_xch:
+            ener += self.data["xch"]["scf_energy"] - self.data["gs"]["scf_energy"] - np.min(ener)
+        else:
+            ener += self.data["fch"]["scf_energy"] #TODO check this
+
+        ener = ener*Ha # convert energy to eV
+
+        # calculate overlap and store absorption
+        xi = (np.array(full_ovlp_matrix)).T
+        norb = min(xi.shape)
+
+        absorption = []
+        for ixyz in [0, 1, 2]:
+            chb_xmat = np.array(full_mom_matrix)[ixyz, :]
+            absorption.append(rx.AbsCalc(ixyz, xi, nocc, norb, chb_xmat))
+
+        self.mbxas = {
+            "absorptions" : absorption,
+            "energies"    : ener
+            }
+
+        return
+
     @staticmethod
     def __check_basis_indexing(data, output, indices):
 
@@ -381,6 +451,36 @@ class Qchem_mbxas():
             data['localized_coefficients']["qchem_order"] = indices
 
         return data
+
+    # broaden spectrum to plot it
+    @staticmethod
+    def broadened_spectrum(x, energies, intensities, sigma):
+
+        def gaussian_broadening(x, sigma):
+            return np.exp(-x**2 / (2 * sigma**2)) / (sigma * np.sqrt(2 * np.pi))
+
+        broadened_spec = np.zeros_like(x)
+        for energy, intensity in zip(energies, intensities**2):
+            broadened_spec += intensity * gaussian_broadening(x - energy, sigma)
+
+        return broadened_spec
+
+    # function to get MBXAS spectra
+    def get_mbxas_spectra(self, sigma=0.3, npoints=3001, tol=0.01):
+
+        min_E = np.min(self.mbxas["energies"])
+        max_E = np.max(self.mbxas["energies"])
+
+        dE = max_E - min_E
+
+        energy = np.linspace(min_E - tol*dE, max_E + tol*dE, npoints)
+
+        spectra = self.broadened_spectrum(energy, self.mbxas["energies"],
+                                          np.mean(self.mbxas["absorptions"], axis=0),
+                                          sigma)
+
+        return energy, spectra
+
 
     # save object as pkl file
     def save_object(self, oname=None, save_path=None):

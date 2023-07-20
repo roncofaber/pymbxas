@@ -14,6 +14,7 @@ Setting up a full calculation is as easy as doing:
 ```python
 import ase
 import ase.build
+import matplotlib.pyplot as plt
 from pymbxas.calculators.qchem import Qchem_mbxas
 
 # build molecule
@@ -36,6 +37,15 @@ obj = Qchem_mbxas(
     qchem_params = qchem_params,
     excitation   = 0, #excite 0th atom --> Boys automatically finds the 1s orbital
     )
+
+# Obtained broadened MBXAS spectra
+X, Y = obj.get_mbxas_spectra()
+
+# Plot spectra
+plt.figure()
+plt.plot(X, Y)
+plt.show()
+
 ```
 
 ### Roadmap
