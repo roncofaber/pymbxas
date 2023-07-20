@@ -35,8 +35,24 @@ obj = Qchem_mbxas(
     charge,
     multiplicity,
     qchem_params = qchem_params,
-    excitation   = 0, #excite 0th atom --> Boys automatically finds the 1s orbital
+    excitation   = 0, #excite 0th atom --> code automatically finds the relevant 1s orbital
     )
+
+# Obtained broadened MBXAS spectra
+X, Y = obj.get_mbxas_spectra()
+
+# Plot spectra
+plt.figure()
+plt.plot(X, Y)
+plt.show()
+
+```
+You can easily reload a saved ".pkl" file as follow:
+```python
+from pymbxas.calculators.qchem import Qchem_mbxas
+
+# load MBXAS object
+obj = Qchem_mbxas(pkl_file="mbxas_obj.pkl") #change with actual name of file
 
 # Obtained broadened MBXAS spectra
 X, Y = obj.get_mbxas_spectra()
