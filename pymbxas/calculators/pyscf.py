@@ -312,7 +312,7 @@ class PySCF_mbxas():
         self.output["fch"] = fch_calc.stdout.log.getvalue()
         self.data["fch"]   = parse_pyscf_calculator(fch_calc)
 
-        if self.__print_fchk:
+        if self.__print_fchk and is_mokit:
             write_to_fchk(fch_calc, self.__tdir + "/output_fch.fchk")
 
         return fch_calc
@@ -373,7 +373,7 @@ class PySCF_mbxas():
         self.output["xch"] = xch_calc.stdout.log.getvalue()
         self.data["xch"]   = parse_pyscf_calculator(xch_calc)
 
-        if self.__print_fchk:
+        if self.__print_fchk and is_mokit:
             write_to_fchk(xch_calc, self.__tdir + "/output_xch.fchk")
 
         return xch_calc
