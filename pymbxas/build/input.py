@@ -39,12 +39,26 @@ def update(d, u):
     return d
 
 
-def update_input(qchem_params, extra_input, use_boys=False,
+def update_input(qchem_params, extra_input, calc_type, use_boys=False,
                  scf_guess=None, occupation=None):
 
     # copy input
     qchem_params = copy.deepcopy(qchem_params)
     extra_input  = copy.deepcopy(extra_input)
+
+    # remove mom_type #TODO ugly and temporary
+    if "mom_type" in qchem_params:
+
+        mom_type = qchem_params["mom_type"]
+        del qchem_params["mom_type"]
+
+        if calc_type == "gs":
+            pass
+        else:
+            if mom_type == 0: # 0 --> all MOM
+                extra_input["extra_rem_keywords"]["MOM_METHOD"] = "MOM"
+            if mom_type == 1: # 1 --> all IMOM
+                extra_input["extra_rem_keywords"]["MOM_METHOD"] = "IMOM"
 
     # update with default params
     qchem_params = update(qchem_params, extra_input)
@@ -91,11 +105,11 @@ def make_qchem_input(molecule, charge, multiplicity,
 
     # update params depending on calculation
     if calc_type == "gs":
-        qchem_params = update_input(qchem_params, gs_def_params, use_boys,
-                                    scf_guess, occupation)
+        qchem_params = update_input(qchem_params, gs_def_params, calc_type,
+                                    use_boys, scf_guess, occupation)
     elif calc_type in ["fch", "xch"]:
-        qchem_params = update_input(qchem_params, xas_def_params, use_boys,
-                                    scf_guess, occupation)
+        qchem_params = update_input(qchem_params, xas_def_params, calc_type,
+                                    use_boys, scf_guess, occupation)
 
     # generate input
     qchem_input = QchemInput(

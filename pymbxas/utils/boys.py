@@ -9,60 +9,86 @@ Created on Thu Jul 13 15:55:09 2023
 """
 
 import numpy as np
-from .basis import get_basis_set_info
+from pyscf import lo
+# from .basis import get_basis_set_info
 #%%
 
-# function to generate a list of 1s orbitals for a specific channel
-def find_1s_in_channel(boys_coeff, atom_coeffs, atom_labels, symbols):
-    symbol_list = np.concatenate([[cc]*len(atom_coeffs[cc]) for cc in range(len(symbols))])
-    labels_list = np.concatenate(atom_labels)
-    dominant_atoms = np.argmax(np.abs(boys_coeff), axis=1)
+def do_boys_pyscf(dft_calc, deg_orbitals):
 
-    orb_types   = labels_list[dominant_atoms]
-    orb_symbols = symbol_list[dominant_atoms]
+    mo_boys = []
+    for ii in [0,1]:
 
-    found_elements = []
-    s1_list = [None]*len(symbols)
-    for idx, (orb_typ, orb_id) in enumerate(zip(orb_types, orb_symbols)):
+        # save old orbitals
+        old_orb = dft_calc.mo_coeff[ii].copy()
 
-        if orb_typ == "s" and orb_id not in found_elements:
-            found_elements.append(orb_id)
-            s1_list[orb_id] = idx
-    return s1_list
+        # make loc object
+        loc = lo.Boys(dft_calc.mol)
 
-# find the 1s orbitals of the system
-def find_1s_orbitals(gs_data, use_localized=False):
+        # run boys on MO from calculation
+        loc.run(mo_coeff=dft_calc.mo_coeff[ii][:, deg_orbitals[ii]])
 
-    # get basis set information
-    atom_coeffs, atom_labels, symbols, nbasis = get_basis_set_info(gs_data['basis'])
+        # reupdate old orbitals with boys
+        old_orb[:, deg_orbitals[ii]] = loc.mo_coeff
 
-    s_orbitals   = {}
-    # iterate over channels and find 1s orbitals
-    for channel in ["alpha", "beta"]:
+        # append to boys array
+        mo_boys.append(old_orb)
 
-        if use_localized:
-            orb_coeff = np.array(gs_data["localized_coefficients"][channel])
-        else:
-            orb_coeff = np.array(gs_data["coefficients"][channel])
+    return mo_boys
 
-        # calculate which ones are the 1s orbitals
-        s1_list = find_1s_in_channel(orb_coeff, atom_coeffs, atom_labels, symbols)
-        s_orbitals[channel] = s1_list
 
-    return s_orbitals
 
-# calculate the boys overlap
-def calculate_boys_overlap(boys_coeffs, fch_coeffs, basis_overlap):
 
-    boys_overlap = {}
-    # iterate over channels and calculate overlap
-    for channel in ["alpha", "beta"]:
+# # function to generate a list of 1s orbitals for a specific channel
+# def find_1s_in_channel(boys_coeff, atom_coeffs, atom_labels, symbols):
+#     symbol_list = np.concatenate([[cc]*len(atom_coeffs[cc]) for cc in range(len(symbols))])
+#     labels_list = np.concatenate(atom_labels)
+#     dominant_atoms = np.argmax(np.abs(boys_coeff), axis=1)
 
-        boys_coeff = np.array(boys_coeffs[channel])
-        exci_coeff = np.array(fch_coeffs[channel])
+#     orb_types   = labels_list[dominant_atoms]
+#     orb_symbols = symbol_list[dominant_atoms]
 
-        # calculate boys overlap factor
-        OVLP = np.linalg.multi_dot([boys_coeff, basis_overlap, exci_coeff.T])
-        boys_overlap[channel] = OVLP
+#     found_elements = []
+#     s1_list = [None]*len(symbols)
+#     for idx, (orb_typ, orb_id) in enumerate(zip(orb_types, orb_symbols)):
 
-    return boys_overlap
+#         if orb_typ == "s" and orb_id not in found_elements:
+#             found_elements.append(orb_id)
+#             s1_list[orb_id] = idx
+#     return s1_list
+
+# # find the 1s orbitals of the system
+# def find_1s_orbitals(gs_data, use_localized=False):
+
+#     # get basis set information
+#     atom_coeffs, atom_labels, symbols, nbasis = get_basis_set_info(gs_data['basis'])
+
+#     s_orbitals   = {}
+#     # iterate over channels and find 1s orbitals
+#     for channel in ["alpha", "beta"]:
+
+#         if use_localized:
+#             orb_coeff = np.array(gs_data["localized_coefficients"][channel])
+#         else:
+#             orb_coeff = np.array(gs_data["coefficients"][channel])
+
+#         # calculate which ones are the 1s orbitals
+#         s1_list = find_1s_in_channel(orb_coeff, atom_coeffs, atom_labels, symbols)
+#         s_orbitals[channel] = s1_list
+
+#     return s_orbitals
+
+# # calculate the boys overlap
+# def calculate_boys_overlap(boys_coeffs, fch_coeffs, basis_overlap):
+
+#     boys_overlap = {}
+#     # iterate over channels and calculate overlap
+#     for channel in ["alpha", "beta"]:
+
+#         boys_coeff = np.array(boys_coeffs[channel])
+#         exci_coeff = np.array(fch_coeffs[channel])
+
+#         # calculate boys overlap factor
+#         OVLP = np.linalg.multi_dot([boys_coeff, basis_overlap, exci_coeff.T])
+#         boys_overlap[channel] = OVLP
+
+#     return boys_overlap

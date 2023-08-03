@@ -28,7 +28,6 @@ def determine_excitation(excitation):
     elif isinstance(excitation, dict):
         exc_dict.update(excitation)
 
-
     return exc_dict
 
 # Function to transform an occ. dict to input ready for QCHEM

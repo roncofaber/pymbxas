@@ -110,6 +110,7 @@ class Qchem_mbxas():
         self.excitation   = check.determine_excitation(excitation)
 
         # initialize empty stuff
+        self.input = {}
         self.output = {}
         self.data   = {}
 
@@ -162,7 +163,12 @@ class Qchem_mbxas():
             print("> XCH calculation: ", end = "", flush=True)
             xch_output, xch_data = self.run_xch(fch_data["coefficients"])
             xch_time = time.time() - fch_time - gs_time - start_time
-            print("finished in {:.2f} s.".format(xch_time))
+
+            if xch_output is None: #failed
+                print("failed! - ignoring XCH")
+
+            else:
+                print("finished in {:.2f} s.".format(xch_time))
             tot_time += xch_time
 
         print("> MBXAS calculation: ", end = "", flush=True)
@@ -231,7 +237,8 @@ class Qchem_mbxas():
         # update with correct number of electrons
         self.excitation["nelectrons"] = [self.n_alpha, self.n_beta]
 
-        # store output
+        # store input/output
+        self.input["gs"]  = gs_input
         self.output["gs"] = gs_output
         self.basis_overlap = gs_data["overlap"]
         if self.__save_all:
@@ -291,7 +298,8 @@ class Qchem_mbxas():
         # old version, loc coeff need to be swapped and override qchem_order
         fch_data = self.__check_basis_indexing(fch_data, fch_output, self.basis["indexing"])
 
-        # store output
+        # store input/output
+        self.input["fch"]  = fch_input
         self.output["fch"] = fch_output
         if self.__save_all:
             self.data["fch"] = fch_data
@@ -347,11 +355,22 @@ class Qchem_mbxas():
                                      qchem_params, "xch", occupation=xch_occ,
                                      scf_guess=scf_guess)
 
-        # run calculation
-        xch_output, xch_data = get_output_from_qchem(
-            xch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
-            return_electronic_structure = True, scratch = self.__sdir,
-            delete_scratch = not self.__keep_scratch)
+        # try to run calculation
+        try:
+            xch_output, xch_data = get_output_from_qchem(
+                xch_input, processors = self.__nprocs, use_mpi = self.__is_mpi,
+                return_electronic_structure = True, scratch = self.__sdir,
+                delete_scratch = not self.__keep_scratch)
+
+            self.__xch_failed = False
+
+        except: #calculation failed
+
+            self.__is_xch = False
+            self.__xch_failed = True
+
+            return None, None
+
 
         # parse output (#TODO in future we won't need to print the output so it can be done directly)
         xch_data.update(basic_parser_qchem(xch_output))
@@ -359,7 +378,8 @@ class Qchem_mbxas():
         # old version, loc coeff need to be swapped and override qchem_order
         xch_data = self.__check_basis_indexing(xch_data, xch_output, self.basis["indexing"])
 
-        # store output
+        # store input/output
+        self.input["xch"]  = xch_input
         self.output["xch"] = xch_output
         if self.__save_all:
             self.data["xch"] = xch_data
@@ -387,13 +407,6 @@ class Qchem_mbxas():
         # select excitation channel
         channel = self.excitation["channel"]
 
-        # TODO check if this works:
-        # CI_Expansion = rd.Unres_CISreader(output_file, check_amp)
-        # E_f = []
-        # E_f.append(0)
-        # for i in CI_Expansion:
-        #  E_f.append(i[1])
-
         # get excitation info
         nocc = self.data["fch"]["number_of_electrons"][channel]
         core_ind_gs = self.excitation["eject"]
@@ -403,18 +416,18 @@ class Qchem_mbxas():
             nocc, core_ind_gs, path=self.__tdir, channel=channel)
 
         # read energy of unoccupied states #TODO check consistency
-        ener = self.data["fch"]["mo_energies"][channel][nocc+1:]
+        ener = np.array(self.data["fch"]["mo_energies"][channel][nocc+1:])
 
         # align energies
         if self.__is_xch:
             ener += self.data["xch"]["scf_energy"] - self.data["gs"]["scf_energy"] - np.min(ener)
-        else:
-            ener += self.data["fch"]["scf_energy"] #TODO check this
+        # else:
+            # ener += self.data["fch"]["scf_energy"] #TODO check this
 
         ener = ener*Ha # convert energy to eV
 
         # calculate overlap and store absorption
-        xi = (np.array(full_ovlp_matrix)).T
+        xi = np.array(full_ovlp_matrix).T
         norb = min(xi.shape)
 
         absorption = []
@@ -456,11 +469,13 @@ class Qchem_mbxas():
     @staticmethod
     def broadened_spectrum(x, energies, intensities, sigma):
 
+        intensities = np.asarray(intensities)
+
         def gaussian_broadening(x, sigma):
             return np.exp(-x**2 / (2 * sigma**2)) / (sigma * np.sqrt(2 * np.pi))
 
         broadened_spec = np.zeros_like(x)
-        for energy, intensity in zip(energies, intensities**2):
+        for energy, intensity in zip(energies, intensities**2): #square intensity
             broadened_spec += intensity * gaussian_broadening(x - energy, sigma)
 
         return broadened_spec
