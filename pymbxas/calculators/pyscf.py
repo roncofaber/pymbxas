@@ -213,6 +213,8 @@ class PySCF_mbxas():
         if self.__is_pbc:
             # generate density fitter
             self.df_obj = gs_calc.with_df
+        else:
+            self.df_obj = None
 
         # check for degenerate delocalized orbitals and if necessary, do Boys
         s1_orbitals = self.__find_delocalized_orbitals(gs_mol, gs_calc,
