@@ -58,3 +58,11 @@ def determine_occupation(occupation):
             occ_string += "\n  "
 
         return occ_string
+    
+#TODO expand this to work with mixed PBCs, works only for full pbc at the moment
+def check_pbc(pbc, structure):   
+    if pbc is None:
+        return all(structure.get_pbc())
+    else:
+        assert(isinstance(pbc, bool))
+        return pbc

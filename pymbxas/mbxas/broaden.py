@@ -27,7 +27,7 @@ def broadened_spectrum(x, energies, intensities, sigma):
 # function to get MBXAS spectra
 def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01):
 
-    Ha = 27.211407953
+    Ha = 27.2113862161
 
     min_E = np.min(energies)
     max_E = np.max(energies)

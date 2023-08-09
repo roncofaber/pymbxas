@@ -88,8 +88,6 @@ def update_input(qchem_params, extra_input, calc_type, use_boys=False,
 
     return qchem_params
 
-#%%
-
 # Function to generate an input for a QCHEM calculation,
 # specify calc type to add default params needed for MBXAS
 def make_qchem_input(molecule, charge, multiplicity,
