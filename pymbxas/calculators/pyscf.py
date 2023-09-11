@@ -21,7 +21,7 @@ from pymbxas.io.pyscf import parse_pyscf_calculator
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator, make_density_fitter
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
-from pymbxas.utils.boys import do_boys_pyscf
+from pymbxas.utils.boys import do_localization_pyscf
 from pymbxas.mbxas.mbxas import run_MBXAS_pyscf
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.cleanup import remove_tmp_files
@@ -69,6 +69,7 @@ class PySCF_mbxas():
                  save_all     = True, # save chkfile
                  save_name    = "pyscf_obj.pkl", # name of saved file
                  save_path    = None, # path of saved object
+                 loc_type     = "ibo"
                  ):
 
         # restart object from a pkl file
@@ -87,7 +88,7 @@ class PySCF_mbxas():
         if pkl_file is None:
             self.__initialize_from_scratch(structure, charge, spin, excitation,
                                           xc, basis, pbc, do_xch, verbose, print_fchk,
-                                          print_output, save_all)
+                                          print_output, save_all, loc_type)
         
         # run MBXAS calculation
         if run_calc:
@@ -100,7 +101,7 @@ class PySCF_mbxas():
 
     def __initialize_from_scratch(self, structure, charge, spin, excitation,
                                   xc, basis, pbc, do_xch, verbose, print_fchk,
-                                  print_output, save_all):
+                                  print_output, save_all, loc_type):
 
         # output, verbose and printing
         self.__print_fchk   = print_fchk
@@ -123,6 +124,7 @@ class PySCF_mbxas():
         self.basis      = basis
         self.__is_pbc   = check.check_pbc(pbc, structure)
         self.__is_xch   = do_xch
+        self.__loc_type = loc_type
 
         # initialize empty stuff
         self.output = {}
@@ -216,34 +218,17 @@ class PySCF_mbxas():
         else:
             self.df_obj = None
 
-        # check for degenerate delocalized orbitals and if necessary, do Boys
-        s1_orbitals = self.__find_delocalized_orbitals(gs_mol, gs_calc,
-                                                       excitation["ato_idx"],
-                                                       check_deg = True)
-
-        # if orbitals are delocalized, do Boys and overwrite MO coeff
+        # check for degenerate delocalized orbitals and if necessary, do loc
+        s1_orbitals = self.__run_localization(gs_mol, gs_calc,
+                                              excitation["ato_idx"],
+                                              channel, self.__loc_type)
+        
         if not len(s1_orbitals[channel]) == 1:
-            
-            # if len(s1_orbitals[channel]) == 0:
-            # s1_orbitals = [np.where(ii == 1)[0].tolist() for ii in gs_calc.mo_occ]
-            
-            print("Boys with: {}".format(s1_orbitals))
-
-            self.__use_boys = True
-            mo_boys = do_boys_pyscf(gs_calc, s1_orbitals)
-            gs_calc.mo_coeff = mo_boys
-
-            # check again for delocalized orbitals
-            s1_orbitals = self.__find_delocalized_orbitals(gs_mol, gs_calc,
-                                                           excitation["ato_idx"],
-                                                           check_deg = False)
-
-            if not len(s1_orbitals[channel]) == 1:
-                warnings.warn("Attention, the GS orbitals might still be delocalized.")
-                if self.__print_fchk and is_mokit:
-                    write_to_fchk(gs_calc, self.__tdir + "/output_gs_del.fchk", overwrite_mol=True)
+            warnings.warn("Attention, the GS orbitals might still be delocalized.")
+            if self.__print_fchk and is_mokit:
+                write_to_fchk(gs_calc, self.__tdir + "/output_gs_del.fchk", overwrite_mol=True)
                 
-        # decide which orbital to eject
+        # decide which orbital to eject #TODO change to where weight is max
         self.excitation["eject"] = s1_orbitals[channel][0]
 
         # obtain number of electrons
@@ -443,6 +428,32 @@ class PySCF_mbxas():
                                          check_deg=check_deg)
             s1_orbitals.append(s1orb)
 
+        return s1_orbitals
+    
+    def __run_localization(self, mole, dft_calc, exc_atom, channel, loc_type):
+        
+        # check for degenerate delocalized orbitals and if necessary, do Boys
+        s1_orbitals = self.__find_delocalized_orbitals(mole, dft_calc,
+                                                       exc_atom,
+                                                       check_deg = True)
+
+        # if orbitals are already localized, return
+        if len(s1_orbitals[channel]) == 1:
+            return s1_orbitals
+            
+
+        # else: do localization and overwrite MO coeff
+        print("Localization of orbs {} using {}.".format(s1_orbitals, loc_type))
+
+        self.__use_boys = True
+        mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
+        dft_calc.mo_coeff = mo_loc
+        
+        # check again for delocalized orbitals
+        s1_orbitals = self.__find_delocalized_orbitals(mole, dft_calc,
+                                                       exc_atom,
+                                                       check_deg = False)
+        
         return s1_orbitals
 
     # save object as pkl file
