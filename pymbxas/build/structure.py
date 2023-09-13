@@ -15,7 +15,7 @@ from pymbxas.utils.check_keywords import check_pbc
 
 # convert an ase Atoms object to a mole or cell object for pyscf
 def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
-                verbose=5, print_output=True):
+                verbose=4, print_output=True):
 
     # generate atom list to feed to object
     atom_list = []

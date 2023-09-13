@@ -33,10 +33,10 @@ def make_density_fitter(mol, pbc, cderi=False):
     return df_obj
 
 # Function to make a pyscf calculator that both work with PBC and not.
-def make_pyscf_calculator(mol, xc, is_pbc, dens_fit, calc_name=None,
-                          save=False):
+def make_pyscf_calculator(mol, xc, pbc=False, solvent=None, dens_fit=None,
+                          calc_name=None, save=False):
     
-    if is_pbc:
+    if pbc:
         calc = pypbc.dft.UKS(mol, xc=xc).density_fit()
         
         # density fit object is string
@@ -47,8 +47,12 @@ def make_pyscf_calculator(mol, xc, is_pbc, dens_fit, calc_name=None,
     else:
         # generate KS calculator
         calc = dft.UKS(mol, xc=xc)
-
     
+    # add solvent treatment
+    if solvent is not None:
+        calc = calc.ddCOSMO()
+        calc.with_solvent.eps = solvent
+
     # Use chkfile to store calculation (if you want)
     if isinstance(calc_name, str) and save:
        calc.chkfile = '{}.chkfile'.format(calc_name)

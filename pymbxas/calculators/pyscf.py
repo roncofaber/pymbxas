@@ -15,11 +15,11 @@ import warnings
 import numpy as np
 
 # self module utilities
-import pymbxas
+# import pymbxas
 import pymbxas.utils.check_keywords as check
 from pymbxas.io.pyscf import parse_pyscf_calculator
 from pymbxas.build.structure import ase_to_mole
-from pymbxas.build.input_pyscf import make_pyscf_calculator, make_density_fitter
+from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
 from pymbxas.utils.boys import do_localization_pyscf
 from pymbxas.mbxas.mbxas import run_MBXAS_pyscf
@@ -27,8 +27,6 @@ from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.cleanup import remove_tmp_files
 
 # pyscf stuff
-# from pyscf import gto, scf, dft
-from pyscf.pbc import gto, scf, dft
 from pyscf.scf.addons import mom_occ
 
 # MOKIT stuff
@@ -59,6 +57,7 @@ class PySCF_mbxas():
                  xc           = "b3lyp",
                  basis        = "def2-svpd",
                  pbc          = None,
+                 solvent      = None,
                  do_xch       = True,
                  target_dir   = None,
                  verbose      = 4,
@@ -72,10 +71,12 @@ class PySCF_mbxas():
                  loc_type     = "ibo"
                  ):
 
-        # restart object from a pkl file
+        # restart object from a pkl file and terminate
         if pkl_file is not None:
             self.__restart_from_pickle(pkl_file)
-
+            
+            return
+        
         # store directories and path
         self.__cdir = os.getcwd() # current directory
         self.__tdir = os.getcwd() if target_dir is None \
@@ -87,7 +88,7 @@ class PySCF_mbxas():
 
         if pkl_file is None:
             self.__initialize_from_scratch(structure, charge, spin, excitation,
-                                          xc, basis, pbc, do_xch, verbose, print_fchk,
+                                          xc, basis, pbc, solvent, do_xch, verbose, print_fchk,
                                           print_output, save_all, loc_type)
         
         # run MBXAS calculation
@@ -100,7 +101,7 @@ class PySCF_mbxas():
         return
 
     def __initialize_from_scratch(self, structure, charge, spin, excitation,
-                                  xc, basis, pbc, do_xch, verbose, print_fchk,
+                                  xc, basis, pbc, solvent, do_xch, verbose, print_fchk,
                                   print_output, save_all, loc_type):
 
         # output, verbose and printing
@@ -113,7 +114,7 @@ class PySCF_mbxas():
         # check (#TODO in future allow to restart from a GS calculation)
         self.__ran_GS   = False
         self.__ran_FCH  = True
-        self.__use_boys = False
+        self.__use_loc = False
 
         # store calculation details
         self.structure  = structure
@@ -122,7 +123,8 @@ class PySCF_mbxas():
         self.excitation = check.determine_excitation(excitation)
         self.xc         = xc
         self.basis      = basis
-        self.__is_pbc   = check.check_pbc(pbc, structure)
+        self.solvent    = solvent
+        self.pbc   = check.check_pbc(pbc, structure)
         self.__is_xch   = do_xch
         self.__loc_type = loc_type
 
@@ -163,13 +165,6 @@ class PySCF_mbxas():
             xch_calc = self.run_xch()
             
         self.run_mbxas()
-        
-        # self.timings = {
-        #     "gs"  : gs_time,
-        #     "fch" : fch_time,
-        #     "xch" : xch_time,
-        #     "mbxas" : mbxas_time
-        #     }
 
         # go back where we were
         remove_tmp_files(self.__tdir)
@@ -196,23 +191,25 @@ class PySCF_mbxas():
         spin      = self.spin
         basis     = self.basis
         xc        = self.xc
+        pbc       = self.pbc
+        solvent   = self.solvent
         excitation  = self.excitation
         
         channel = s2i(excitation["channel"])
 
         # generate molecule
-        gs_mol = ase_to_mole(structure, charge, spin, basis=basis, pbc=self.__is_pbc,
+        gs_mol = ase_to_mole(structure, charge, spin, basis=basis, pbc=self.pbc,
                              verbose=self.__verbose, print_output=self.__print_output)
         
         # generate KS calculator
-        gs_calc = make_pyscf_calculator(gs_mol, xc, self.__is_pbc, None,
-                                        calc_name="gs", save=self.__save_all)
+        gs_calc = make_pyscf_calculator(gs_mol, xc, pbc=pbc, solvent=solvent,
+                                        dens_fit=None, calc_name="gs", save=self.__save_all)
 
         # run SCF #TODO: check how to change convergence parameters
         gs_calc.kernel()
         
         # store density object
-        if self.__is_pbc:
+        if self.pbc:
             # generate density fitter
             self.df_obj = gs_calc.with_df
         else:
@@ -248,7 +245,7 @@ class PySCF_mbxas():
         gs_time = time.time() - start_time
         self.print("finished in {:.2f} s.".format(gs_time))
         self.print("> Exciting orbital #{} - {} orbs.".format(self.excitation["eject"],
-                                                    ["KS", "Boys"][self.__use_boys]))
+                                                    ["KS", "Boys"][self.__use_loc]))
 
         return gs_calc
 
@@ -260,13 +257,15 @@ class PySCF_mbxas():
         self.print("> FCH calculation: ", end = "", flush=True)
         start_time  = time.time()
         
-        structure  = self.structure
-        charge     = 0 #FIXME self.charge + 1 # +1 cause we kick out one lil electron
+        structure = self.structure
+        charge    = self.charge + 1 #FIXME self.charge + 1 # +1 cause we kick out one lil electron
+        basis     = self.basis
+        xc        = self.xc
+        pbc       = self.pbc
+        solvent   = self.solvent
         excitation = self.excitation
-        basis      = self.basis
-        xc         = self.xc
         channel    = s2i(excitation["channel"])
-        spin       = 0 #FIXME self.spin - channel*2 + 1 # spin changes +1 if c=0, -1 else
+        spin       = self.spin - channel*2 + 1 #FIXME self.spin - channel*2 + 1 # spin changes +1 if c=0, -1 else
 
 
         # Read MO coefficients and occupation number from GS
@@ -278,12 +277,13 @@ class PySCF_mbxas():
 
         # change charge #TODO: test what happens to mol outside of here
         fch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=self.__is_pbc, verbose=self.__verbose,
+                              pbc=self.pbc, verbose=self.__verbose,
                               print_output=self.__print_output)
 
         # Defnine new SCF calculator
-        fch_calc = make_pyscf_calculator(fch_mol, xc, self.__is_pbc, self.df_obj,
-                                        calc_name="fch", save=self.__save_all)
+        fch_calc = make_pyscf_calculator(fch_mol, xc, pbc=pbc, solvent=solvent,
+                                         dens_fit=self.df_obj, calc_name="fch",
+                                         save=self.__save_all)
 
         # Construct new density matrix with new occupation pattern
         dm_u = fch_calc.make_rdm1(scf_guess, occupation)
@@ -318,13 +318,15 @@ class PySCF_mbxas():
         self.print("> XCH calculation: ", end = "", flush=True)
         start_time = time.time()
 
-        structure  = self.structure
-        charge     = self.charge
+        structure = self.structure
+        charge    = self.charge
+        basis     = self.basis
+        xc        = self.xc
+        pbc       = self.pbc
+        solvent   = self.solvent
         excitation = self.excitation
-        basis      = self.basis
-        xc         = self.xc
-        spin       = self.spin
         channel    = s2i(excitation["channel"])
+        spin       = self.spin
 
         # Read MO coefficients and occupation number from GS
         scf_guess  = self.data["gs"].mo_coeff.copy()
@@ -336,12 +338,13 @@ class PySCF_mbxas():
 
         # make XCH molecule
         xch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=self.__is_pbc, verbose=self.__verbose,
+                              pbc=self.pbc, verbose=self.__verbose,
                               print_output=self.__print_output)
 
         # define new SCF calculator
-        xch_calc = make_pyscf_calculator(xch_mol, xc, self.__is_pbc, self.df_obj,
-                                        calc_name="xch", save=self.__save_all)
+        xch_calc = make_pyscf_calculator(xch_mol, xc, pbc=pbc, solvent=solvent,
+                                         dens_fit=self.df_obj, calc_name="xch",
+                                         save=self.__save_all)
 
         # Construct new density matrix with new occupation pattern
         dm_u = xch_calc.make_rdm1(scf_guess, occupation)
@@ -402,14 +405,16 @@ class PySCF_mbxas():
 
         return
 
-    def get_mbxas_spectra(self, axis=None, sigma=0.3, npoints=3001, tol=0.01):
+    def get_mbxas_spectra(self, axis=None, sigma=0.3, npoints=3001, tol=0.01,
+                          erange=None):
 
         energies    = self.mbxas["energies"]
         intensities = self.mbxas["absorption"]
 
 
         erange, spectras = get_mbxas_spectra(energies, intensities,
-                                              sigma=sigma, npoints=npoints,tol=tol)
+                                              sigma=sigma, npoints=npoints,
+                                              tol=tol, erange=erange)
 
         if axis is None:
             spectras = np.mean(spectras, axis=0)
@@ -445,7 +450,7 @@ class PySCF_mbxas():
         # else: do localization and overwrite MO coeff
         print("Localization of orbs {} using {}.".format(s1_orbitals, loc_type))
 
-        self.__use_boys = True
+        self.__use_loc = True
         mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
         dft_calc.mo_coeff = mo_loc
         

@@ -25,12 +25,17 @@ def broadened_spectrum(x, energies, intensities, sigma):
     return broadened_spec
 
 # function to get MBXAS spectra
-def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01):
+def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01,
+                      erange=None):
 
     Ha = 27.2113862161
-
-    min_E = np.min(energies)
-    max_E = np.max(energies)
+    
+    if erange is not None:
+        min_E, max_E = np.array(erange)/Ha
+        tol = 0
+    else:
+        min_E = np.min(energies)
+        max_E = np.max(energies)
 
     dE = max_E - min_E
 
