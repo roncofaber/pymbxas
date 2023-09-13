@@ -46,11 +46,11 @@ def make_pyscf_calculator(mol, xc, pbc=False, solvent=None, dens_fit=None,
             
     else:
         # generate KS calculator
-        calc = dft.UKS(mol, xc=xc)
+        calc = mol.UKS(xc=xc)
     
     # add solvent treatment
     if solvent is not None:
-        calc = calc.ddCOSMO()
+        calc = calc.DDCOSMO()
         calc.with_solvent.eps = solvent
 
     # Use chkfile to store calculation (if you want)
