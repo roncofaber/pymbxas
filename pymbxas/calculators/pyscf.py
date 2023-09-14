@@ -445,6 +445,10 @@ class PySCF_mbxas():
         # if orbitals are already localized, return
         if len(s1_orbitals[channel]) == 1:
             return s1_orbitals
+        
+        # localize up to highest degenerate oribtal #TEST
+        if loc_type.endswith("m"):
+            s1_orbitals = [list(range(np.max(orb))) for orb in s1_orbitals]
             
 
         # else: do localization and overwrite MO coeff
