@@ -16,7 +16,10 @@ import numpy as np
 
 # self module utilities
 # import pymbxas
+from pymbxas.excitation import Excitation
 import pymbxas.utils.check_keywords as check
+from pymbxas.utils.auxiliary import s2i, as_list
+from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.pyscf import parse_pyscf_calculator
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
@@ -38,14 +41,6 @@ except:
 
 #%%
 
-def s2i(string):
-    if string == "beta":
-        return 1
-    elif string == "alpha":
-        return 0
-    else:
-        raise "ERROR CHANNEL"
-
 class PySCF_mbxas():
 
     def __init__(self,
@@ -65,77 +60,80 @@ class PySCF_mbxas():
                  print_output = False,
                  run_calc     = True,
                  save         = True,  # save object as pkl file
-                 save_all     = True, # save chkfile
+                 save_chk     = False, # save calculation as chkfile
                  save_name    = "pyscf_obj.pkl", # name of saved file
                  save_path    = None, # path of saved object
                  loc_type     = "ibo"
                  ):
-
+        
         # restart object from a pkl file and terminate
         if pkl_file is not None:
-            self.__restart_from_pickle(pkl_file)
-            
+            self._restart_from_pickle(pkl_file)
             return
         
         # store directories and path
-        self.__cdir = os.getcwd() # current directory
-        self.__tdir = os.getcwd() if target_dir is None \
+        self._cdir = os.getcwd() # current directory
+        self._tdir = os.getcwd() if target_dir is None \
             else os.path.abspath(target_dir) # target directory
 
-        if not os.path.exists(self.__tdir):
-            os.makedirs(self.__tdir)
+        if not os.path.exists(self._tdir):
+            os.makedirs(self._tdir)
 
 
         if pkl_file is None:
-            self.__initialize_from_scratch(structure, charge, spin, excitation,
-                                          xc, basis, pbc, solvent, do_xch, verbose, print_fchk,
-                                          print_output, save_all, loc_type)
-        
-        # run MBXAS calculation
-        if run_calc:
-            self.run_all_calculations()
-
-        if save:
-            self.save_object(save_name, save_path)
+            self._initialize_from_scratch(structure, charge, spin, excitation,
+                                          xc, basis, pbc, solvent, do_xch,
+                                          verbose, print_fchk, print_output,
+                                          save, loc_type, save_name, save_path,
+                                          save_chk)
         
         return
 
-    def __initialize_from_scratch(self, structure, charge, spin, excitation,
-                                  xc, basis, pbc, solvent, do_xch, verbose, print_fchk,
-                                  print_output, save_all, loc_type):
+    def _initialize_from_scratch(self, structure, charge, spin, excitation,
+                                  xc, basis, pbc, solvent, do_xch, verbose,
+                                  print_fchk, print_output, save, loc_type,
+                                  save_name, save_path, save_chk):
 
         # output, verbose and printing
-        self.__print_fchk   = print_fchk
-        self.__print_output = print_output
-        self.__verbose      = verbose
-        self.__save_all     = save_all
-        self.__print_all    = True # for the moment print all
+        self._print_fchk   = print_fchk
+        self._print_output = print_output
+        self._verbose      = verbose
+        self._save         = save
+        self._save_chk     = save_chk
+        self._print_all    = True # for the moment print all
+        self._save_path    = save_path
+        self._save_name    = save_name 
 
         # check (#TODO in future allow to restart from a GS calculation)
-        self.__ran_GS   = False
-        self.__ran_FCH  = True
-        self.__use_loc = False
+        self._ran_GS   = False
+        self._ran_FCH  = False
+        self._used_loc = False # becomes true if localization was needed
 
         # store calculation details
-        self.structure  = structure
-        self.charge     = charge
-        self.spin       = spin
-        self.excitation = check.determine_excitation(excitation)
-        self.xc         = xc
-        self.basis      = basis
-        self.solvent    = solvent
-        self.pbc   = check.check_pbc(pbc, structure)
-        self.__is_xch   = do_xch
-        self.__loc_type = loc_type
+        self.structure = structure
+        self.charge    = charge
+        self.spin      = spin
+        self.xc        = xc
+        self.basis     = basis
+        self.solvent   = solvent
+        self.pbc       = check.check_pbc(pbc, structure)
+        
+        self._is_xch  = do_xch
+        self.loc_type = loc_type
 
         # initialize empty stuff
-        self.output = {}
-        self.data   = {}
-
+        self.output      = {}
+        self.data        = {}
+        self.excitations = []
+        self.excited_idxs = []
+        
+        # run everything
+        self.run_all_calculations(excitation)
+        
         return
 
     # restart object from pkl file previously saved
-    def __restart_from_pickle(self, pkl_file):
+    def _restart_from_pickle(self, pkl_file):
 
         # open previously generated gpw file
         with open(pkl_file, "rb") as fin:
@@ -144,33 +142,56 @@ class PySCF_mbxas():
         self.__dict__ = restart.__dict__.copy()
 
         return
-
-    # # Function to run all calc (GS, FCH, XCH) in sequence
-    def run_all_calculations(self):
+    
+    # excite an atom or a list of atoms
+    def _single_excite(self, ato_idx):
+        
+        if ato_idx in self.excited_idxs:
+           return 
+            
+        self.excited_idxs.append(ato_idx)
+        self.excitations.append(Excitation(ato_idx, self, excite=True))
+            
+        return
+    
+    def excite(self, ato_idxs):
+        
+        to_excite = atoms_to_indexes(self.structure, ato_idxs)
+        
+        for ato_idx in to_excite:
+            self._single_excite(ato_idx)
+        
+        return
+        
+        
+    # Function to run all calc (GS, FCH, XCH) in sequence
+    def run_all_calculations(self, excitation):
         
         self.print(">>> Starting PyMBXAS <<<")
         
         # change directory
-        os.chdir(self.__tdir)
-
+        os.chdir(self._tdir)
+        
+        self.print(">> GS:", end="")
+        
         # run ground state
-        gs_calc = self.run_ground_state()
+        gt = self.run_ground_state()
         
-        #TODO: allow to specify a list of atoms to excite so that only one GS
-        # has to be run
-        # run FCH
-        fch_calc = self.run_fch()
+        self.print(u" {:.1f} s [\u2713] <<".format(gt))
         
-        if self.__is_xch:
-            xch_calc = self.run_xch()
+        # run all specified excitations
+        self.excite(excitation)
+        
+        # save object if needed
+        if self._save:
+            self.save_object(self._save_name, self._save_path)
             
-        self.run_mbxas()
-
         # go back where we were
-        remove_tmp_files(self.__tdir)
-        os.chdir(self.__cdir)
+        remove_tmp_files(self._tdir)
+        os.chdir(self._cdir)
         
         self.print(">>> PyMBXAS finished successfully! <<<\n")
+        
         
         return
 
@@ -178,11 +199,10 @@ class PySCF_mbxas():
     def run_ground_state(self):
         
         # check if GS was already performed, if so: skip
-        if self.__ran_GS:
+        if self._ran_GS:
             print("GS already ran with this configuration. Skipping.")
-            return self.output["gs"], self.data["gs"]
+            return
         
-        self.print("> Ground state calculation: ", flush=True)
         start_time  = time.time()
 
         # get system settings
@@ -193,17 +213,15 @@ class PySCF_mbxas():
         xc        = self.xc
         pbc       = self.pbc
         solvent   = self.solvent
-        excitation  = self.excitation
         
-        channel = s2i(excitation["channel"])
-
         # generate molecule
         gs_mol = ase_to_mole(structure, charge, spin, basis=basis, pbc=self.pbc,
-                             verbose=self.__verbose, print_output=self.__print_output)
+                             verbose=self._verbose, print_output=self._print_output)
         
         # generate KS calculator
         gs_calc = make_pyscf_calculator(gs_mol, xc, pbc=pbc, solvent=solvent,
-                                        dens_fit=None, calc_name="gs", save=self.__save_all)
+                                        dens_fit=None, calc_name="gs",
+                                        save=self._save_chk)
 
         # run SCF #TODO: check how to change convergence parameters
         gs_calc.kernel()
@@ -215,203 +233,77 @@ class PySCF_mbxas():
         else:
             self.df_obj = None
 
-        # check for degenerate delocalized orbitals and if necessary, do loc
-        s1_orbitals = self.__run_localization(gs_mol, gs_calc,
-                                              excitation["ato_idx"],
-                                              channel, self.__loc_type)
-        
-        if not len(s1_orbitals[channel]) == 1:
-            warnings.warn("Attention, the GS orbitals might still be delocalized.")
-            if self.__print_fchk and is_mokit:
-                write_to_fchk(gs_calc, self.__tdir + "/output_gs_del.fchk", overwrite_mol=True)
-                
-        # decide which orbital to eject #TODO change to where weight is max
-        self.excitation["eject"] = s1_orbitals[channel][0]
-
         # obtain number of electrons
         self.n_electrons = [gs_calc.nelec[0], gs_calc.nelec[1]]
 
+        # write fchk file if using mokit
+        if self._print_fchk and is_mokit:
+            write_to_fchk(gs_calc, self._tdir + "/output_gs_del.fchk", overwrite_mol=True)
+            
+        ato_list = [cc for cc, ato in enumerate(structure) if ato.symbol != "H"]
+        
+        # run localization
+        mo_loc, self._used_loc = self._run_localization(gs_mol, gs_calc,
+                                                        ato_list, self.loc_type)
+        
+        if self._used_loc:
+            gs_calc.mo_coeff = mo_loc
+            
+        # write fchk file if using mokit
+        if self._print_fchk and is_mokit:
+            write_to_fchk(gs_calc, self._tdir + "/output_gs_loc.fchk", overwrite_mol=True)
+            
         # store input/output
         self.output["gs"] = gs_calc.stdout.log.getvalue()
         self.data["gs"]   = parse_pyscf_calculator(gs_calc)
 
-        # write fchk file if using mokit
-        if self.__print_fchk and is_mokit:
-            write_to_fchk(gs_calc, self.__tdir + "/output_gs.fchk", overwrite_mol=True)
-
         # mark that GS has been run
-        self.__ran_GS = True
+        self._ran_GS = True
         
         gs_time = time.time() - start_time
-        self.print("finished in {:.2f} s.".format(gs_time))
-        self.print("> Exciting orbital #{} - {} orbs.".format(self.excitation["eject"],
-                                                    ["KS", "Boys"][self.__use_loc]))
 
-        return gs_calc
-
-    # run the FCH calculation
-    def run_fch(self):
+        return gs_time
+    
+    @staticmethod
+    def _run_localization(mole, dft_calc, ato_idxs, loc_type):
         
-        assert self.__ran_GS, "Please run a GS calculation first."
+        # check for degenerate delocalized orbitals and if necessary, do Boys
+        s1_orbitals = []
+        for ii in [0,1]:
+            s1orb = find_1s_orbitals_pyscf(mole, dft_calc.mo_coeff[ii],
+                                         dft_calc.mo_energy[ii], as_list(ato_idxs),
+                                         check_deg=True)
+            s1_orbitals.append(s1orb)
+
+        # if orbitals are already localized, return
+        # if all(len(s1_orbitals[channel]) == len(ato_idxs) for channel in [0,1]):
+            # return s1_orbitals
         
-        self.print("> FCH calculation: ", end = "", flush=True)
-        start_time  = time.time()
-        
-        structure = self.structure
-        charge    = self.charge + 1 #FIXME self.charge + 1 # +1 cause we kick out one lil electron
-        basis     = self.basis
-        xc        = self.xc
-        pbc       = self.pbc
-        solvent   = self.solvent
-        excitation = self.excitation
-        channel    = s2i(excitation["channel"])
-        spin       = self.spin - channel*2 + 1 #FIXME self.spin - channel*2 + 1 # spin changes +1 if c=0, -1 else
-
-
-        # Read MO coefficients and occupation number from GS
-        scf_guess  = self.data["gs"].mo_coeff.copy()
-        occupation = self.data["gs"].mo_occ.copy()
-
-        # Assign initial occupation pattern --> kick orbital N
-        occupation[channel][excitation["eject"]] = 0
-
-        # change charge #TODO: test what happens to mol outside of here
-        fch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=self.pbc, verbose=self.__verbose,
-                              print_output=self.__print_output)
-
-        # Defnine new SCF calculator
-        fch_calc = make_pyscf_calculator(fch_mol, xc, pbc=pbc, solvent=solvent,
-                                         dens_fit=self.df_obj, calc_name="fch",
-                                         save=self.__save_all)
-
-        # Construct new density matrix with new occupation pattern
-        dm_u = fch_calc.make_rdm1(scf_guess, occupation)
-
-        # Apply mom occupation principle
-        fch_calc = mom_occ(fch_calc, scf_guess, occupation)
-
-        # Start new SCF with new density matrix
-        fch_calc.scf(dm_u)
-
-        # store input/output
-        self.output["fch"] = fch_calc.stdout.log.getvalue()
-        self.data["fch"]   = parse_pyscf_calculator(fch_calc)
-
-        if self.__print_fchk and is_mokit:
-            write_to_fchk(fch_calc, self.__tdir + "/output_fch.fchk")
+        # localize up to highest degenerate orbital #TEST
+        if loc_type.endswith("m"):
+            s1_orbitals = [list(range(np.max(orb))) for orb in s1_orbitals]
             
+        used_loc = True
+        mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
         
-        fch_time = time.time() - start_time
-        self.print("finished in {:.2f} s.".format(fch_time))
-        
-        # mark that GS has been run
-        self.__ran_FCH = True
-
-        return fch_calc
-
-    # run the XCH calculation
-    def run_xch(self, scf_guess=None):
-
-        assert self.__ran_GS, "Please run a GS calculation first."
-        
-        self.print("> XCH calculation: ", end = "", flush=True)
-        start_time = time.time()
-
-        structure = self.structure
-        charge    = self.charge
-        basis     = self.basis
-        xc        = self.xc
-        pbc       = self.pbc
-        solvent   = self.solvent
-        excitation = self.excitation
-        channel    = s2i(excitation["channel"])
-        spin       = self.spin
-
-        # Read MO coefficients and occupation number from GS
-        scf_guess  = self.data["gs"].mo_coeff.copy()
-        occupation = self.data["gs"].mo_occ.copy()
-
-        # Assign initial occupation pattern --> kick orbital N
-        occupation[channel][excitation["eject"]] = 0
-        occupation[channel][self.n_electrons[channel]] = 1
-
-        # make XCH molecule
-        xch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=self.pbc, verbose=self.__verbose,
-                              print_output=self.__print_output)
-
-        # define new SCF calculator
-        xch_calc = make_pyscf_calculator(xch_mol, xc, pbc=pbc, solvent=solvent,
-                                         dens_fit=self.df_obj, calc_name="xch",
-                                         save=self.__save_all)
-
-        # Construct new density matrix with new occupation pattern
-        dm_u = xch_calc.make_rdm1(scf_guess, occupation)
-
-        # Apply mom occupation principle
-        xch_calc = mom_occ(xch_calc, scf_guess, occupation)
-
-        # Start new SCF with new density matrix
-        try:
-            xch_calc.scf(dm_u)
-            self.__xch_failed = False
-            
-            # store input/output
-            self.output["xch"] = xch_calc.stdout.log.getvalue()
-            self.data["xch"]   = parse_pyscf_calculator(xch_calc)
-
-            if self.__print_fchk and is_mokit:
-                write_to_fchk(xch_calc, self.__tdir + "/output_xch.fchk")
-
-        except: #calculation failed
-
-            self.__is_xch = False
-            self.__xch_failed = True
-
-            return None
-
-        xch_time = time.time() - start_time
-        
-        if self.__xch_failed: #failed
-            self.print("failed! - ignoring XCH")
-        else:
-            self.print("finished in {:.2f} s.".format(xch_time))
-        
-        return xch_calc
-
-    # run MBXAS from a set of pySCF calculations
-    def run_mbxas(self):
-        
-        assert self.__ran_GS and self.__ran_FCH, "Please run a GS and FCH calculation first."
-        
-        self.print("> MBXAS calculation: ", end = "", flush=True)
-        start_time = time.time()
-
-        energies, absorption, mb_ovlp, dip_KS, b_ovlp = run_MBXAS_pyscf(
-            self.data["gs"], self.data["fch"], s2i(self.excitation["channel"]),
-            self.data["xch"])
-
-        self.mbxas = {
-            "energies"   : energies,
-            "absorption" : absorption,
-            "mb_overlap" : mb_ovlp,
-            "dipole_KS"  : dip_KS,
-            "basis_ovlp" : b_ovlp
-            }
-        
-        mbxas_time = time.time() - start_time
-        self.print("finished in {:.2f} s.".format(mbxas_time))
-
-        return
-
-    def get_mbxas_spectra(self, axis=None, sigma=0.3, npoints=3001, tol=0.01,
+        return mo_loc, used_loc
+    
+    def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.02, npoints=3001, tol=0.01,
                           erange=None):
-
-        energies    = self.mbxas["energies"]
-        intensities = self.mbxas["absorption"]
-
-
+        
+        ato_idxs = atoms_to_indexes(self.structure, ato_idx)
+        
+        energies    = []
+        intensities = []
+        for exc in self.excitations:
+            if exc.ato_idx not in ato_idxs:
+                continue
+            energies.append(exc.mbxas["energies"])
+            intensities.append(exc.mbxas["absorption"])
+        energies = np.concatenate(energies)
+        intensities = np.concatenate(intensities, axis=1)
+        
+        
         erange, spectras = get_mbxas_spectra(energies, intensities,
                                               sigma=sigma, npoints=npoints,
                                               tol=tol, erange=erange)
@@ -423,48 +315,6 @@ class PySCF_mbxas():
 
         return erange, spectras
 
-    @staticmethod
-    def __find_delocalized_orbitals(mole, dft_calc, exc_atom, check_deg):
-
-        s1_orbitals = []
-        for ii in [0,1]:
-            s1orb = find_1s_orbitals_pyscf(mole, dft_calc.mo_coeff[ii],
-                                         dft_calc.mo_energy[ii], exc_atom,
-                                         check_deg=check_deg)
-            s1_orbitals.append(s1orb)
-
-        return s1_orbitals
-    
-    def __run_localization(self, mole, dft_calc, exc_atom, channel, loc_type):
-        
-        # check for degenerate delocalized orbitals and if necessary, do Boys
-        s1_orbitals = self.__find_delocalized_orbitals(mole, dft_calc,
-                                                       exc_atom,
-                                                       check_deg = True)
-
-        # if orbitals are already localized, return
-        if len(s1_orbitals[channel]) == 1:
-            return s1_orbitals
-        
-        # localize up to highest degenerate oribtal #TEST
-        if loc_type.endswith("m"):
-            s1_orbitals = [list(range(np.max(orb))) for orb in s1_orbitals]
-            
-
-        # else: do localization and overwrite MO coeff
-        print("Localization of orbs {} using {}.".format(s1_orbitals, loc_type))
-
-        self.__use_loc = True
-        mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
-        dft_calc.mo_coeff = mo_loc
-        
-        # check again for delocalized orbitals
-        s1_orbitals = self.__find_delocalized_orbitals(mole, dft_calc,
-                                                       exc_atom,
-                                                       check_deg = False)
-        
-        return s1_orbitals
-
     # save object as pkl file
     def save_object(self, oname=None, save_path=None):
 
@@ -472,7 +322,7 @@ class PySCF_mbxas():
             oname = self.savename
 
         if save_path is None:
-            path = self.__tdir
+            path = self._tdir
         else:
             path = save_path
 
@@ -488,5 +338,5 @@ class PySCF_mbxas():
         return
     
     def print(self, toprint, end="\n", flush=True):
-        if self.__print_all:
+        if self._print_all:
             print(toprint, end=end, flush=flush)

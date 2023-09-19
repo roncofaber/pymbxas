@@ -18,18 +18,6 @@ def_exc_dict = {
     "inject"  : False,
     }
 
-def determine_excitation(excitation):
-
-    exc_dict = def_exc_dict.copy()
-
-    # if integer, it means User want to excite Nth atom
-    if isinstance(excitation, int):
-        exc_dict["ato_idx"] = excitation
-    elif isinstance(excitation, dict):
-        exc_dict.update(excitation)
-
-    return exc_dict
-
 # Function to transform an occ. dict to input ready for QCHEM
 def determine_occupation(occupation):
 
