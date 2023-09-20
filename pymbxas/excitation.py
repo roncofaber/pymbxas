@@ -6,27 +6,15 @@ Created on Thu Sep 14 14:49:52 2023
 @author: roncoroni
 """
 
-import os
-import dill
 import time
-import warnings
 import copy
 
-# good ol' numpy
-import numpy as np
-
 # self module utilities
-from pymbxas.utils.auxiliary import s2i, as_list
-import pymbxas.utils.check_keywords as check
-from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.pyscf import parse_pyscf_calculator
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
-from pymbxas.utils.boys import do_localization_pyscf
 from pymbxas.mbxas.mbxas import run_MBXAS_pyscf
-from pymbxas.mbxas.broaden import get_mbxas_spectra
-from pymbxas.io.cleanup import remove_tmp_files
 
 # pyscf stuff
 from pyscf.scf.addons import mom_occ
@@ -40,40 +28,39 @@ except:
     
 #%%
     
-class Excitation():
+class Excitation(object):
     
-    def __init__(self, ato_idx, pyscf_obj, channel=1, excite=False):
+    def __init__(self, ato_idx, pobj, channel=1, excite=False):
         
-        assert pyscf_obj._ran_GS, "Please run a GS calculation first."
+        assert pobj._ran_GS, "Please run a GS calculation first."
         
-        pyscf_obj = copy.deepcopy(pyscf_obj)
-        
-        self.structure = pyscf_obj.structure
-        self.charge    = pyscf_obj.charge
-        self.basis     = pyscf_obj.basis
-        self.xc        = pyscf_obj.xc
-        self.pbc       = pyscf_obj.pbc
-        self.solvent   = pyscf_obj.solvent
-        self.spin      = pyscf_obj.spin
-        self.n_electrons = pyscf_obj.n_electrons
+        self.structure = pobj.structure
+        self.charge    = pobj.charge
+        self.basis     = pobj.basis
+        self.xc        = pobj.xc
+        self.pbc       = pobj.pbc
+        self.solvent   = pobj.solvent
+        self.spin      = pobj.spin
+        self.n_electrons = pobj.n_electrons
         self.ato_idx   = ato_idx
-        self.df_obj    = pyscf_obj.df_obj
-        
-        self._verbose = pyscf_obj._verbose
-        self._print_fchk = pyscf_obj._print_fchk
-        self._print_output = pyscf_obj._print_output
-        self._print_all = pyscf_obj._print_all
-        self._tdir = pyscf_obj._tdir
-        self._save_chk = pyscf_obj._save_chk
-        
+        self.df_obj    = pobj.df_obj
         self.channel   = channel
+        
+        self._verbose      = pobj._verbose
+        self._print_fchk   = pobj._print_fchk
+        self._print_output = pobj._print_output
+        self._print_all    = pobj._print_all
+        self._tdir         = pobj._tdir
+        self._save_chk     = pobj._save_chk
+        
+        # store output
         self.output = {}
-        self.data   = {"gs" : pyscf_obj.data["gs"]}
+        self.data   = {"gs" : pobj.data}
         
         # find index of orbital to excite
-        self.orb_idx = find_1s_orbitals_pyscf(self.data["gs"].mol,
-                                              self.data["gs"].mo_coeff[self.channel],
-                                              self.data["gs"].mo_energy[self.channel],
+        self.orb_idx = find_1s_orbitals_pyscf(pobj.data.mol,
+                                              pobj.data.mo_coeff[channel],
+                                              pobj.data.mo_energy[channel],
                                               [ato_idx],
                                               check_deg=False)
         
@@ -169,16 +156,16 @@ class Excitation():
         xc        = self.xc
         pbc       = self.pbc
         solvent   = self.solvent
-        channel    = self.channel
-        spin       = self.spin
+        channel   = self.channel
+        spin      = self.spin
         
         ato_idx = self.ato_idx
         
         start_time = time.time()
 
         # Read MO coefficients and occupation number from GS
-        scf_guess  = self.data["fch"].mo_coeff.copy()
-        occupation = self.data["fch"].mo_occ.copy()
+        scf_guess  = copy.deepcopy(self.data["fch"].mo_coeff)
+        occupation = copy.deepcopy(self.data["fch"].mo_occ)
 
         # Assign initial occupation pattern --> kick orbital N
         # occupation[channel][self.orb_idx] = 0
@@ -186,7 +173,7 @@ class Excitation():
 
         # make XCH molecule
         xch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=self.pbc, verbose=self._verbose,
+                              pbc=pbc, verbose=self._verbose,
                               print_output=self._print_output)
 
         # define new SCF calculator

@@ -106,7 +106,6 @@ class PySCF_mbxas():
 
         # check (#TODO in future allow to restart from a GS calculation)
         self._ran_GS   = False
-        self._ran_FCH  = False
         self._used_loc = False # becomes true if localization was needed
 
         # store calculation details
@@ -132,6 +131,43 @@ class PySCF_mbxas():
         
         return
 
+    # Function to run all calc (GS, FCH, XCH) in sequence
+    def run_all_calculations(self, excitation):
+        
+        self.print(">>> Starting PyMBXAS <<<")
+        
+        # change directory
+        os.chdir(self._tdir)
+        
+        self.print(">> GS:", end="")
+        
+        # run ground state
+        gt = self.run_ground_state()
+        
+        self.print(u" {:.1f} s [\u2713] <<".format(gt))
+        
+        # save object if needed
+        if self._save:
+            self.save_object(self._save_name, self._save_path)
+        
+        # run all specified excitations
+        self.excite(excitation)
+        
+        # save object if needed
+        if self._save:
+            self.save_object(self._save_name, self._save_path)
+            
+        self.print("Saved everything as {}".format(self._save_name))
+            
+        # go back where we were
+        remove_tmp_files(self._tdir)
+        os.chdir(self._cdir)
+        
+        self.print(">>> PyMBXAS finished successfully! <<<\n")
+        
+        
+        return
+    
     # restart object from pkl file previously saved
     def _restart_from_pickle(self, pkl_file):
 
@@ -160,47 +196,20 @@ class PySCF_mbxas():
         
         for ato_idx in to_excite:
             self._single_excite(ato_idx)
-        
-        return
-        
-        
-    # Function to run all calc (GS, FCH, XCH) in sequence
-    def run_all_calculations(self, excitation):
-        
-        self.print(">>> Starting PyMBXAS <<<")
-        
-        # change directory
-        os.chdir(self._tdir)
-        
-        self.print(">> GS:", end="")
-        
-        # run ground state
-        gt = self.run_ground_state()
-        
-        self.print(u" {:.1f} s [\u2713] <<".format(gt))
-        
-        # run all specified excitations
-        self.excite(excitation)
-        
-        # save object if needed
-        if self._save:
-            self.save_object(self._save_name, self._save_path)
             
-        # go back where we were
-        remove_tmp_files(self._tdir)
-        os.chdir(self._cdir)
-        
-        self.print(">>> PyMBXAS finished successfully! <<<\n")
-        
+            # save object if needed
+            if self._save:
+                self.save_object(self._save_name, self._save_path)
         
         return
+        
 
     # run the GS calculation
     def run_ground_state(self):
         
         # check if GS was already performed, if so: skip
         if self._ran_GS:
-            print("GS already ran with this configuration. Skipping.")
+            self.print("GS already ran with this configuration. Skipping.")
             return
         
         start_time  = time.time()
@@ -254,8 +263,8 @@ class PySCF_mbxas():
             write_to_fchk(gs_calc, self._tdir + "/output_gs_loc.fchk", overwrite_mol=True)
             
         # store input/output
-        self.output["gs"] = gs_calc.stdout.log.getvalue()
-        self.data["gs"]   = parse_pyscf_calculator(gs_calc)
+        self.output = gs_calc.stdout.log.getvalue()
+        self.data   = parse_pyscf_calculator(gs_calc)
 
         # mark that GS has been run
         self._ran_GS = True
@@ -334,7 +343,6 @@ class PySCF_mbxas():
         with open(oname, 'wb') as fout:
             dill.dump(self, fout)
 
-        print("Saved everything as {}".format(oname))
         return
     
     def print(self, toprint, end="\n", flush=True):
