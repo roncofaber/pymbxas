@@ -68,8 +68,12 @@ def calculate_boys_overlap(boys_coeffs, fch_coeffs, basis_overlap):
     return boys_overlap
 
 
-def find_1s_orbitals_pyscf(molecule, coefficients, energies, ato_idxs, check_deg=True):
+def find_1s_orbitals_pyscf(molecule, coefficients, energies, occupations,
+                           ato_idxs, check_deg=True):
 
+    # occupied orbitals only
+    occ_idxs = np.where(occupations == 1)[0]
+    
     # orbital labels
     ao_labels = np.array(molecule.ao_labels(fmt=False))
 
@@ -78,13 +82,13 @@ def find_1s_orbitals_pyscf(molecule, coefficients, energies, ato_idxs, check_deg
         
         symbol = molecule.atom_symbol(to_excite)
     
-        for cc, orb in enumerate(coefficients.T):
+        for cc, orb in enumerate(coefficients.T[occ_idxs]):
     
             # square coeff
             orb2 = orb**2
     
             # find indexes where orbital has weight
-            rel_idxs = np.where(orb2 > 0.5*np.max(orb2))[0]
+            rel_idxs = np.where(orb2 > 0.3*np.max(orb2))[0]
     
             rel_labels = ao_labels[rel_idxs]
             # there is weight on our orbital of interest

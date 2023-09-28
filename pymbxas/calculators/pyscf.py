@@ -31,6 +31,7 @@ from pymbxas.io.cleanup import remove_tmp_files
 
 # pyscf stuff
 from pyscf.scf.addons import mom_occ
+from pyscf import lo
 
 # MOKIT stuff
 try:
@@ -63,7 +64,8 @@ class PySCF_mbxas():
                  save_chk     = False, # save calculation as chkfile
                  save_name    = "pyscf_obj.pkl", # name of saved file
                  save_path    = None, # path of saved object
-                 loc_type     = "ibo"
+                 loc_type     = "ibo",
+                 save_calc    = False, # store calculator in object (large size!)
                  ):
         
         # restart object from a pkl file and terminate
@@ -85,14 +87,14 @@ class PySCF_mbxas():
                                           xc, basis, pbc, solvent, do_xch,
                                           verbose, print_fchk, print_output,
                                           save, loc_type, save_name, save_path,
-                                          save_chk)
+                                          save_chk, save_calc)
         
         return
 
     def _initialize_from_scratch(self, structure, charge, spin, excitation,
                                   xc, basis, pbc, solvent, do_xch, verbose,
                                   print_fchk, print_output, save, loc_type,
-                                  save_name, save_path, save_chk):
+                                  save_name, save_path, save_chk, save_calc):
 
         # output, verbose and printing
         self._print_fchk   = print_fchk
@@ -102,7 +104,8 @@ class PySCF_mbxas():
         self._save_chk     = save_chk
         self._print_all    = True # for the moment print all
         self._save_path    = save_path
-        self._save_name    = save_name 
+        self._save_name    = save_name
+        self._save_calc    = save_calc
 
         # check (#TODO in future allow to restart from a GS calculation)
         self._ran_GS   = False
@@ -160,11 +163,12 @@ class PySCF_mbxas():
         self.print("Saved everything as {}".format(self._save_name))
             
         # go back where we were
-        remove_tmp_files(self._tdir)
         os.chdir(self._cdir)
         
         self.print(">>> PyMBXAS finished successfully! <<<\n")
         
+        # clean up mess
+        remove_tmp_files(self._tdir)
         
         return
     
@@ -186,7 +190,7 @@ class PySCF_mbxas():
            return 
             
         self.excited_idxs.append(ato_idx)
-        self.excitations.append(Excitation(ato_idx, self, excite=True))
+        self.excitations.append(Excitation(ato_idx, self))
             
         return
     
@@ -258,13 +262,28 @@ class PySCF_mbxas():
         if self._used_loc:
             gs_calc.mo_coeff = mo_loc
             
-        # write fchk file if using mokit
-        if self._print_fchk and is_mokit:
-            write_to_fchk(gs_calc, self._tdir + "/output_gs_loc.fchk", overwrite_mol=True)
-            
         # store input/output
         self.output = gs_calc.stdout.log.getvalue()
         self.data   = parse_pyscf_calculator(gs_calc)
+        
+        self.data.mo_livvo = self._calculate_livvo()
+        
+        # write fchk file if using mokit
+        if self._print_fchk and is_mokit and self._used_loc:
+            write_to_fchk(gs_calc, self._tdir + "/output_gs_loc.fchk", overwrite_mol=True)
+            
+            mo_vvo = np.zeros(mo_loc.shape)
+            for channel in [0,1]:
+                
+                shape = self.data.mo_livvo.shape[1]
+                
+                mo_vvo[channel][:,:shape] = self.data.mo_livvo
+            
+            write_to_fchk(gs_calc, self._tdir + "/livvo.fchk", overwrite_mol=True,
+                          mo_coeff=mo_vvo)
+            
+        if self._save_calc:
+            self.data.calc = gs_calc
 
         # mark that GS has been run
         self._ran_GS = True
@@ -273,20 +292,21 @@ class PySCF_mbxas():
 
         return gs_time
     
-    @staticmethod
-    def _run_localization(mole, dft_calc, ato_idxs, loc_type):
+    def _run_localization(self, mole, dft_calc, ato_idxs, loc_type):
         
         # check for degenerate delocalized orbitals and if necessary, do Boys
         s1_orbitals = []
         for ii in [0,1]:
             s1orb = find_1s_orbitals_pyscf(mole, dft_calc.mo_coeff[ii],
-                                         dft_calc.mo_energy[ii], as_list(ato_idxs),
+                                         dft_calc.mo_energy[ii],
+                                         dft_calc.mo_occ[ii], as_list(ato_idxs),
                                          check_deg=True)
             s1_orbitals.append(s1orb)
-
-        # if orbitals are already localized, return
-        # if all(len(s1_orbitals[channel]) == len(ato_idxs) for channel in [0,1]):
-            # return s1_orbitals
+        
+        if len(s1_orbitals[1]) <= 1:
+            return dft_calc.mo_coeff, False
+        
+        self.print(" loc: {}".format(s1_orbitals[1]), end="")
         
         # localize up to highest degenerate orbital #TEST
         if loc_type.endswith("m"):
@@ -296,6 +316,19 @@ class PySCF_mbxas():
         mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
         
         return mo_loc, used_loc
+    
+    def _calculate_livvo(self): #TODO only for channel 1 (but should be same)
+        
+        mo_coeff = self.data.mo_coeff[1].copy()
+        mo_occ   = self.data.mo_occ[1].copy()
+        
+        occ_idxs = np.where(mo_occ > 0)[0]
+        uno_idxs = np.where(mo_occ == 0)[0]
+        
+        mo_vvo = lo.vvo.livvo(self.data.mol,
+                              mo_coeff[:, occ_idxs], mo_coeff[:, uno_idxs])
+        
+        return mo_vvo
     
     def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.02, npoints=3001, tol=0.01,
                           erange=None):
@@ -326,6 +359,13 @@ class PySCF_mbxas():
 
     # save object as pkl file
     def save_object(self, oname=None, save_path=None):
+        
+        if self._save_calc:
+            
+            tmp_calc = self.data.calc
+            self.data.calc = None
+            
+            # self.print("Attention, cannot save pkl file if 'save_calc' is True.")
 
         if oname is None:
             oname = self.savename
@@ -342,6 +382,9 @@ class PySCF_mbxas():
 
         with open(oname, 'wb') as fout:
             dill.dump(self, fout)
+            
+        if self._save_calc:
+            self.data.calc = tmp_calc
 
         return
     

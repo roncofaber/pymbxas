@@ -51,7 +51,8 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
             charge = charge,
             spin = spin,
             verbose = verbose,
-            stdout = Logger(print_output)
+            stdout = Logger(print_output),
+            max_memory = 0
             )
 
     mol.build()
