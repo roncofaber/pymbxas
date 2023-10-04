@@ -9,7 +9,6 @@ Created on Tue Aug  1 18:13:29 2023
 import os
 import dill
 import time
-import warnings
 
 # good ol' numpy
 import numpy as np
@@ -18,27 +17,20 @@ import numpy as np
 # import pymbxas
 from pymbxas.excitation import Excitation
 import pymbxas.utils.check_keywords as check
-from pymbxas.utils.auxiliary import s2i, as_list
+from pymbxas.utils.auxiliary import as_list
 from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.pyscf import parse_pyscf_calculator
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
 from pymbxas.utils.boys import do_localization_pyscf
-from pymbxas.mbxas.mbxas import run_MBXAS_pyscf
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.cleanup import remove_tmp_files
+from pymbxas.io.write import write_data_to_fchk
 
 # pyscf stuff
 from pyscf.scf.addons import mom_occ
 from pyscf import lo
-
-# MOKIT stuff
-try:
-    from mokit.lib.py2fch_direct import fchk as write_to_fchk
-    is_mokit = True
-except:
-    is_mokit = False
 
 #%%
 
@@ -239,6 +231,10 @@ class PySCF_mbxas():
         # run SCF #TODO: check how to change convergence parameters
         gs_calc.kernel()
         
+        # store input/output
+        self.output = gs_calc.stdout.log.getvalue()
+        self.data   = parse_pyscf_calculator(gs_calc)
+        
         # store density object
         if self.pbc:
             # generate density fitter
@@ -249,39 +245,25 @@ class PySCF_mbxas():
         # obtain number of electrons
         self.n_electrons = [gs_calc.nelec[0], gs_calc.nelec[1]]
 
-        # write fchk file if using mokit
-        if self._print_fchk and is_mokit:
-            write_to_fchk(gs_calc, self._tdir + "/output_gs_del.fchk", overwrite_mol=True)
-            
+        # check if localization is needed and run it
         ato_list = [cc for cc, ato in enumerate(structure) if ato.symbol != "H"]
         
-        # run localization
         mo_loc, self._used_loc = self._run_localization(gs_mol, gs_calc,
                                                         ato_list, self.loc_type)
         
+        # update MO coeff if localization was used
         if self._used_loc:
-            gs_calc.mo_coeff = mo_loc
-            
-        # store input/output
-        self.output = gs_calc.stdout.log.getvalue()
-        self.data   = parse_pyscf_calculator(gs_calc)
+            self.data.mo_coeff_del = self.data.mo_coeff.copy()
+            self.data.mo_coeff = mo_loc
         
+        # calculate LIVVOs
         self.data.mo_livvo = self._calculate_livvo()
         
-        # write fchk file if using mokit
-        if self._print_fchk and is_mokit and self._used_loc:
-            write_to_fchk(gs_calc, self._tdir + "/output_gs_loc.fchk", overwrite_mol=True)
+        # write output fchk files if using mokit
+        if self._print_fchk:
+            self._print_fchk_files()
             
-            mo_vvo = np.zeros(mo_loc.shape)
-            for channel in [0,1]:
-                
-                shape = self.data.mo_livvo.shape[1]
-                
-                mo_vvo[channel][:,:shape] = self.data.mo_livvo
-            
-            write_to_fchk(gs_calc, self._tdir + "/livvo.fchk", overwrite_mol=True,
-                          mo_coeff=mo_vvo)
-            
+        # store calculator (cannot be saved as pkl anyway, just for on the fly)
         if self._save_calc:
             self.data.calc = gs_calc
 
@@ -317,7 +299,8 @@ class PySCF_mbxas():
         
         return mo_loc, used_loc
     
-    def _calculate_livvo(self): #TODO only for channel 1 (but should be same)
+    def _calculate_livvo(self, locmethod='IBO', iaos=None, s=None,
+              exponent=4, grad_tol=1e-8, max_iter=200, verbose=None): #TODO only for channel 1 (but should be same)
         
         mo_coeff = self.data.mo_coeff[1].copy()
         mo_occ   = self.data.mo_occ[1].copy()
@@ -326,9 +309,80 @@ class PySCF_mbxas():
         uno_idxs = np.where(mo_occ == 0)[0]
         
         mo_vvo = lo.vvo.livvo(self.data.mol,
-                              mo_coeff[:, occ_idxs], mo_coeff[:, uno_idxs])
+                              mo_coeff[:, occ_idxs], mo_coeff[:, uno_idxs],
+                              locmethod=locmethod,
+                              iaos=iaos, s=s,
+                              exponent=exponent, grad_tol=grad_tol,
+                              max_iter=max_iter, verbose=verbose)
         
         return mo_vvo
+    
+    def _print_fchk_files(self):
+        
+    # write MOs
+        if self._used_loc:
+        
+            write_data_to_fchk(self.data,
+                               oname    = self._tdir + "/output_gs_del.fchk",
+                               mo_coeff = self.data.mo_coeff_del
+                               )
+            
+            write_data_to_fchk(self.data,
+                               oname    = self._tdir + "/output_gs_loc.fchk",
+                               mo_coeff = self.data.mo_coeff
+                               )
+        
+        else:
+            write_data_to_fchk(self.data,
+                               oname    = self._tdir + "/output_gs.fchk",
+                               mo_coeff = self.data.mo_coeff
+                               )
+        
+        # write LIVVOs
+        mo_vvo = np.zeros(self.data.mo_coeff.shape)
+        for channel in [0,1]:
+            
+            shape = self.data.mo_livvo.shape[1]
+            
+            mo_vvo[channel][:,:shape] = self.data.mo_livvo
+        
+        write_data_to_fchk(self.data,
+                           oname    = self._tdir + "/livvos.fchk",
+                           mo_coeff = self.data.mo_livvo
+                           )
+            
+        return
+    
+    def get_excited_orbital_character(self, ato_idx, livvo=None):
+        
+        if livvo is None:
+            livvo = self.data.mo_livvo
+            
+        basis_ovlp = self.data.mol.intor("int1e_ovlp")
+        
+        ato_idxs = atoms_to_indexes(self.structure, ato_idx)
+        
+        projections = []
+        for excitation in self.excitations:
+            if excitation.ato_idx not in ato_idxs:
+                continue
+            
+            data = excitation.data["fch"]
+            
+            # get unoccupied orbitals
+            uno_idxs = np.where(data.mo_occ[excitation.channel] == 0)[0][1:]
+            CMO      = data.mo_coeff[excitation.channel][:, uno_idxs]
+            
+            # calculate projection of CMOs on LIVVOs basis
+            projection = (CMO.conj().T@basis_ovlp@livvo)**2
+            
+            projections.append(projection)
+        
+        if len(ato_idxs) == 1:
+            return projections[0]
+        else:
+            return projections
+
     
     def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.02, npoints=3001, tol=0.01,
                           erange=None):

@@ -8,6 +8,15 @@ Created on Thu Jun 22 12:01:06 2023
 
 import os
 import pymbxas.build.input as inp
+import numpy as np
+
+# MOKIT stuff
+try:
+    from mokit.lib.py2fch import py2fch
+    from mokit.lib.py2fch_direct import mol2fch
+    is_mokit = True
+except:
+    is_mokit = False
 
 #%%
 
@@ -76,4 +85,50 @@ def write_qchem_job(molecule, charge, multiplicity,
 
         fout.write(qchem_input.get_txt())
 
+    return
+
+
+def write_data_to_fchk(data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
+                       density=False, mo_energy=None):
+    
+    if not is_mokit:
+        return
+    
+    directory = os.path.dirname(oname)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    
+    if mo_coeff is None:
+        mo_coeff = data.mo_coeff
+    
+    if mo_energy is None:
+        mo_energy = data.mo_energy
+        
+    if len(mo_coeff) == 2:
+        nbasis, norbit = mo_coeff[0].shape
+    else:
+        nbasis, norbit = mo_coeff.shape
+        mo_coeff = np.array([mo_coeff, mo_coeff])
+        
+    if not len(mo_energy) == 2:
+        mo_energy = np.array([mo_energy, mo_energy])
+        
+    # shape doesn't match, means that probably the energy is useless
+    if mo_energy.shape[1] != norbit:
+        mo_energy = np.zeros((2, norbit))
+        
+    if norbit > data.mo_coeff[0].shape[1]:
+        print("Cut orbital number cause higher than allowed by IQmol")
+        
+        norbit_max = data.mo_coeff[0].shape[1]
+    else:
+        norbit_max = norbit
+        
+    
+    # actual write
+    mol2fch(data.mol, oname , True, mo_coeff[:,:,:norbit_max])
+    for cc, spin in enumerate(["a", "b"]):
+        py2fch(oname, nbasis, norbit_max, mo_coeff[cc][:,:norbit_max], spin,
+               mo_energy[cc][:norbit_max], False, density)
+    
     return
