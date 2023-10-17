@@ -11,16 +11,14 @@ import numpy as np
 #%%
 
 # Function to run MBXAS of pyscf calculators
-def run_MBXAS_pyscf(gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None):
+def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None):
 
-    # calculate dipole
-    dipole = gs_calc.mol.intor('int1e_r')
+    # calculate dipole and basis overlap
+    dipole = mol.intor('int1e_r')
+    basis_overlap = mol.intor("int1e_ovlp")
     
     # calculate FCH dipole matrix
     dipole_KS = fch_calc.mo_coeff[channel].T@dipole@fch_calc.mo_coeff[channel]
-    
-    # calculate basis overlap
-    basis_overlap = gs_calc.mol.intor("int1e_ovlp")
     
     # calculate many body overlap
     mb_overlap = fch_calc.mo_coeff[channel].T@basis_overlap@gs_calc.mo_coeff[channel]

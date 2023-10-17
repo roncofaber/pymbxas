@@ -19,7 +19,7 @@ from pymbxas.excitation import Excitation
 import pymbxas.utils.check_keywords as check
 from pymbxas.utils.auxiliary import as_list
 from pymbxas.utils.indexing import atoms_to_indexes
-from pymbxas.io.pyscf import parse_pyscf_calculator
+from pymbxas.io.pyscf import pyscf_data
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
@@ -233,7 +233,8 @@ class PySCF_mbxas():
         
         # store input/output
         self.output = gs_calc.stdout.log.getvalue()
-        self.data   = parse_pyscf_calculator(gs_calc)
+        self.data   = pyscf_data(gs_calc)
+        self.mol    = gs_mol
         
         # store density object
         if self.pbc:
@@ -308,7 +309,7 @@ class PySCF_mbxas():
         occ_idxs = np.where(mo_occ > 0)[0]
         uno_idxs = np.where(mo_occ == 0)[0]
         
-        mo_vvo = lo.vvo.livvo(self.data.mol,
+        mo_vvo = lo.vvo.livvo(self.mol,
                               mo_coeff[:, occ_idxs], mo_coeff[:, uno_idxs],
                               locmethod=locmethod,
                               iaos=iaos, s=s,
@@ -319,21 +320,24 @@ class PySCF_mbxas():
     
     def _print_fchk_files(self):
         
-    # write MOs
+    # write MOsmo_occ
         if self._used_loc:
         
-            write_data_to_fchk(self.data,
+            write_data_to_fchk(self.mol,
+                               self.data,
                                oname    = self._tdir + "/output_gs_del.fchk",
                                mo_coeff = self.data.mo_coeff_del
                                )
             
-            write_data_to_fchk(self.data,
+            write_data_to_fchk(self.mol,
+                               self.data,
                                oname    = self._tdir + "/output_gs_loc.fchk",
                                mo_coeff = self.data.mo_coeff
                                )
         
         else:
-            write_data_to_fchk(self.data,
+            write_data_to_fchk(self.mol,
+                               self.data,
                                oname    = self._tdir + "/output_gs.fchk",
                                mo_coeff = self.data.mo_coeff
                                )
@@ -346,7 +350,8 @@ class PySCF_mbxas():
             
             mo_vvo[channel][:,:shape] = self.data.mo_livvo
         
-        write_data_to_fchk(self.data,
+        write_data_to_fchk(self.mol,
+                           self.data,
                            oname    = self._tdir + "/livvos.fchk",
                            mo_coeff = self.data.mo_livvo
                            )
@@ -358,7 +363,7 @@ class PySCF_mbxas():
         if livvo is None:
             livvo = self.data.mo_livvo
             
-        basis_ovlp = self.data.mol.intor("int1e_ovlp")
+        basis_ovlp = self.mol.intor("int1e_ovlp")
         
         ato_idxs = atoms_to_indexes(self.structure, ato_idx)
         
@@ -422,7 +427,7 @@ class PySCF_mbxas():
             # self.print("Attention, cannot save pkl file if 'save_calc' is True.")
 
         if oname is None:
-            oname = self.savename
+            oname = self._save_name
 
         if save_path is None:
             path = self._tdir

@@ -50,15 +50,10 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd',
 class pyscf_data():
     
     def __init__(self, calculator):
-        
-        self.mol       = calculator.mol
+            
         self.mo_coeff  = calculator.mo_coeff
         self.mo_occ    = calculator.mo_occ
         self.mo_energy = calculator.mo_energy
         self.e_tot     = calculator.e_tot
         
         return
-
-def parse_pyscf_calculator(calculator):
-    
-    return pyscf_data(calculator)

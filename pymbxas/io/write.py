@@ -88,15 +88,17 @@ def write_qchem_job(molecule, charge, multiplicity,
     return
 
 
-def write_data_to_fchk(data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
+def write_data_to_fchk(mol, data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
                        density=False, mo_energy=None):
     
     if not is_mokit:
         return
     
     directory = os.path.dirname(oname)
-    if not os.path.exists(directory):
+    if directory and not os.path.exists(directory):
         os.makedirs(directory)
+        
+    mol = mol.copy()
     
     if mo_coeff is None:
         mo_coeff = data.mo_coeff
@@ -113,6 +115,21 @@ def write_data_to_fchk(data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
     if not len(mo_energy) == 2:
         mo_energy = np.array([mo_energy, mo_energy])
         
+    if mo_occ is None:
+        mo_occ = data.mo_occ
+        
+    # update mo_occ just to make sure
+    nelec = mo_occ.sum(axis=1, dtype=int)
+    
+    for cc, ne in enumerate(nelec):
+        
+        if ne > mo_coeff[cc].shape[1]:
+            nelec[cc] = mo_coeff[cc].shape[1]
+        
+            # nelec[cc] = np.minimum(ne, mo_coeff.shape[cc+1])
+    
+    mol.nelec = nelec
+        
     # shape doesn't match, means that probably the energy is useless
     if mo_energy.shape[1] != norbit:
         mo_energy = np.zeros((2, norbit))
@@ -126,7 +143,7 @@ def write_data_to_fchk(data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
         
     
     # actual write
-    mol2fch(data.mol, oname , True, mo_coeff[:,:,:norbit_max])
+    mol2fch(mol, oname , True, mo_coeff[:,:,:norbit_max])
     for cc, spin in enumerate(["a", "b"]):
         py2fch(oname, nbasis, norbit_max, mo_coeff[cc][:,:norbit_max], spin,
                mo_energy[cc][:norbit_max], False, density)

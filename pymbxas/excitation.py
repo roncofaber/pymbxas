@@ -10,7 +10,7 @@ import time
 import copy
 
 # self module utilities
-from pymbxas.io.pyscf import parse_pyscf_calculator
+from pymbxas.io.pyscf import pyscf_data
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
@@ -20,11 +20,7 @@ from pymbxas.mbxas.mbxas import run_MBXAS_pyscf
 from pyscf.scf.addons import mom_occ
 
 # MOKIT stuff
-try:
-    from mokit.lib.py2fch_direct import fchk as write_to_fchk
-    is_mokit = True
-except:
-    is_mokit = False
+from pymbxas.io.write import write_data_to_fchk
     
 #%%
     
@@ -44,7 +40,7 @@ class Excitation(object):
         self.data   = {}
         
         # find index of orbital to excite
-        self.orb_idx = find_1s_orbitals_pyscf(pobj.data.mol,
+        self.orb_idx = find_1s_orbitals_pyscf(pobj.mol,
                                               pobj.data.mo_coeff[channel],
                                               pobj.data.mo_energy[channel],
                                               pobj.data.mo_occ[channel],
@@ -63,7 +59,7 @@ class Excitation(object):
     # use it to run excitation of the selected atom
     def _excite(self, pobj):
         
-        self.print(">>  Exciting atom #{}  <<".format(self.ato_idx), flush=True)
+        self.print(">>  Exciting atom #{}  <<".format(self.ato_idx))
         
         self.print("> FCH:", end="")
         
@@ -122,11 +118,13 @@ class Excitation(object):
 
         # store input/output
         self.output["fch"] = fch_calc.stdout.log.getvalue()
-        self.data["fch"]   = parse_pyscf_calculator(fch_calc)
+        self.data["fch"]   = pyscf_data(fch_calc)
 
-        if pobj._print_fchk and is_mokit:
-            write_to_fchk(fch_calc, pobj._tdir + "/output_fch_{}.fchk".format(
-                self.ato_idx))
+        if pobj._print_fchk:
+            write_data_to_fchk(pobj.mol, fch_calc,
+                               oname = pobj._tdir + "/output_fch_{}.fchk".format(
+                                   self.ato_idx),
+                               )
             
         
         fch_time = time.time() - start_time
@@ -175,11 +173,13 @@ class Excitation(object):
 
         # store input/output
         self.output["xch"] = xch_calc.stdout.log.getvalue()
-        self.data["xch"]   = parse_pyscf_calculator(xch_calc)
+        self.data["xch"]   = pyscf_data(xch_calc)
 
-        if pobj._print_fchk and is_mokit:
-            write_to_fchk(xch_calc, pobj._tdir + "/output_xch_{}.fchk".format(
-                self.ato_idx))
+        if pobj._print_fchk:
+            write_data_to_fchk(pobj.mol, xch_calc,
+                               oname = pobj._tdir + "/output_xch_{}.fchk".format(
+                                   self.ato_idx),
+                               )
 
         xch_time = time.time() - start_time
         
@@ -191,8 +191,8 @@ class Excitation(object):
         start_time = time.time()
 
         energies, absorption, mb_ovlp, dip_KS, b_ovlp = run_MBXAS_pyscf(
-            pobj.data, self.data["fch"], self.orb_idx, channel=self.channel,
-            xch_calc=self.data["xch"])
+            pobj.mol, pobj.data, self.data["fch"], self.orb_idx,
+            channel=self.channel, xch_calc=self.data["xch"])
 
         self.mbxas = {
             "energies"   : energies,
