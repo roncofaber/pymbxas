@@ -92,6 +92,7 @@ def write_data_to_fchk(mol, data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
                        density=False, mo_energy=None):
     
     if not is_mokit:
+        print("No MOKIT")
         return
     
     directory = os.path.dirname(oname)

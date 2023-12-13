@@ -6,6 +6,8 @@ Created on Thu Aug  3 15:29:31 2023
 @author: roncoroni
 """
 
+import ase
+
 from pyscf import gto
 from pyscf.pbc import gto as pgto
 
@@ -52,7 +54,8 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
             spin = spin,
             verbose = verbose,
             stdout = Logger(print_output),
-            max_memory = 0
+            max_memory = 0,
+            unit = 'Angstrom',
             )
 
     mol.build()
@@ -62,3 +65,21 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
         mol.intor = mol.pbc_intor
     
     return mol
+
+
+def mole_to_ase(mol):
+    
+    if mol.unit.startswith("B") or mol.unit.startswith("AU"):
+        conv = ase.units.Bohr
+    else:
+        conv = 1.
+        
+    structure = ase.Atoms(
+        mol.elements,
+        conv*mol.atom_coords()
+        )
+    
+    
+    return structure
+    
+    
