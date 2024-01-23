@@ -401,9 +401,9 @@ class PySCF_mbxas():
                 continue
             energies.append(exc.mbxas["energies"])
             intensities.append(exc.mbxas["absorption"])
+            
         energies = np.concatenate(energies)
         intensities = np.concatenate(intensities, axis=1)
-        
         
         erange, spectras = get_mbxas_spectra(energies, intensities,
                                               sigma=sigma, npoints=npoints,

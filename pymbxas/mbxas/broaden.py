@@ -10,19 +10,16 @@ import numpy as np
 
 #%%
 
-# broaden spectrum to plot it
+def gaussian_broadening(x, sigma):
+    return np.exp(-x**2 / (2 * sigma**2)) / (sigma * np.sqrt(2 * np.pi))
+
+
 def broadened_spectrum(x, energies, intensities, sigma):
 
-    intensities = np.asarray(intensities)
+    x_shifted = x[:, np.newaxis] - energies  # Efficiently subtract energies from each x value
 
-    def gaussian_broadening(x, sigma):
-        return np.exp(-x**2 / (2 * sigma**2)) / (sigma * np.sqrt(2 * np.pi))
+    return np.sum(intensities * gaussian_broadening(x_shifted, sigma)[:, np.newaxis], axis=2)
 
-    broadened_spec = np.zeros_like(x)
-    for energy, intensity in zip(energies, intensities): #square intensity
-        broadened_spec += intensity * gaussian_broadening(x - energy, sigma)
-
-    return broadened_spec
 
 # function to get MBXAS spectra
 def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01,
@@ -38,14 +35,13 @@ def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01,
         max_E = np.max(energies)
 
     dE = max_E - min_E
-
+    
     energy = np.linspace(min_E - tol*dE, max_E + tol*dE, npoints)
+    rel_idxs = (energies > min_E-dE) & (energies < max_E+dE)
 
-    spectras = []
-    for intensity in intensities:
-        spectra = broadened_spectrum(energy, energies,
-                                          intensity**2,
-                                          sigma)
-        spectras.append(spectra)
 
-    return Ha*energy, spectras
+    spectras = broadened_spectrum(energy, energies[rel_idxs],
+                                     intensities[:,rel_idxs]**2,
+                                     sigma)  # Vectorized calculation
+    
+    return Ha*energy, spectras.T

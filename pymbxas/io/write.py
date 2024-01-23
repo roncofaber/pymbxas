@@ -88,8 +88,8 @@ def write_qchem_job(molecule, charge, multiplicity,
     return
 
 
-def write_data_to_fchk(mol, data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
-                       density=False, mo_energy=None):
+def write_data_to_fchk(mol, mo_coeff=None, mo_occ=None, density=False,
+                       mo_energy=None, oname="tmp.fchk",  center=False):
     
     if not is_mokit:
         print("No MOKIT")
@@ -101,26 +101,35 @@ def write_data_to_fchk(mol, data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
         
     mol = mol.copy()
     
-    if mo_coeff is None:
-        mo_coeff = data.mo_coeff
-    
-    if mo_energy is None:
-        mo_energy = data.mo_energy
+    if center:
+        origin = np.mean([ii[1] for ii in mol.atom], axis=0)
         
+        new_atom = mol.atom.copy()
+        for cc, atom in enumerate(new_atom):
+            new_atom[cc][1] = np.array(atom[1]) - origin
+        
+        mol.set(atom=new_atom)
+        mol.build()
+    
+    if mo_coeff is None:
+        mo_coeff = mol.intor_symmetric('int1e_ovlp')
+    
     if len(mo_coeff) == 2:
         nbasis, norbit = mo_coeff[0].shape
     else:
         nbasis, norbit = mo_coeff.shape
         mo_coeff = np.array([mo_coeff, mo_coeff])
-        
-    if not len(mo_energy) == 2:
+    
+    if mo_energy is None:
+        pass
+    elif not len(mo_energy) == 2:
         mo_energy = np.array([mo_energy, mo_energy])
         
-    if mo_occ is None:
-        mo_occ = data.mo_occ
-        
     # update mo_occ just to make sure
-    nelec = mo_occ.sum(axis=1, dtype=int)
+    if mo_occ is not None:
+        nelec = mo_occ.sum(axis=1, dtype=int)
+    else:
+        nelec = list(mol.nelec)
     
     for cc, ne in enumerate(nelec):
         
@@ -132,16 +141,17 @@ def write_data_to_fchk(mol, data, oname="tmp.fchk", mo_coeff=None, mo_occ=None,
     mol.nelec = nelec
         
     # shape doesn't match, means that probably the energy is useless
+    if mo_energy is None:
+        mo_energy = np.zeros((2, norbit))
     if mo_energy.shape[1] != norbit:
         mo_energy = np.zeros((2, norbit))
         
-    if norbit > data.mo_coeff[0].shape[1]:
+    if norbit > mo_coeff[0].shape[1]:
         print("Cut orbital number cause higher than allowed by IQmol")
         
-        norbit_max = data.mo_coeff[0].shape[1]
+        norbit_max = mo_coeff[0].shape[1]
     else:
         norbit_max = norbit
-        
     
     # actual write
     mol2fch(mol, oname , True, mo_coeff[:,:,:norbit_max])
