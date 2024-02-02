@@ -61,8 +61,8 @@ class spectralNode():
         # define values for fitting (convert to eV)
         y_E = Ha*np.array(y_E)
         y_G = Ha*(np.array(y_G))# - np.min(y_G))
-        y_A = np.array(y_A)**2 #TODO ABS
-        y_A = np.vstack([y_A.T, np.mean(y_A, axis=1)]).T
+        y_A = abs(np.array(y_A)) #TODO ABS
+        y_A = np.vstack([y_A.T, np.mean(y_A**2, axis=1)]).T
         Xout  = np.array(Xout) 
         
         return Xout, y_E, y_A, y_G
@@ -115,17 +115,22 @@ class spectralNode():
     @staticmethod
     def __fit_amplitude(Xs, ys_A_axis):
         
-        kernel = 1 * sker.RBF(
+        kernel = 1*sker.RBF(
             length_scale=45.0,
             length_scale_bounds=(1e-3, 1e3)
-            ) #+ sker.DotProduct(
-                # sigma_0 = 1e-2,
-                # sigma_0_bounds=(1e-7, 1e2)
-                # )
+            )
+        # kernel = sker.ConstantKernel(
+        #     constant_value=1e-2,
+        #     constant_value_bounds=(1e-07, 1e2)
+        #     )* sker.DotProduct(
+        #           sigma_0 = 1,
+        #           sigma_0_bounds=(1e-5, 1e5)
+        #           )
 
         k_a = GaussianProcessRegressor(
             kernel,
-            n_restarts_optimizer=30,
+            n_restarts_optimizer = 30,
+            n_targets            = 1
             ).fit(Xs, ys_A_axis)
         
         return k_a
