@@ -7,9 +7,7 @@ Created on Wed Jul  5 12:08:17 2023
 """
 
 import numpy as np
-from functools import reduce
 
-from pyscf.lo import iao, orth
 
 import copy
 
@@ -26,42 +24,54 @@ except:
 """
 Class for a collection of spectras - WIP
 
+Input: list of pyscf objects
+
 """
 
 class Spectras():
     
-    def __init__(self, spectra_list, labels=None, comp=None):
+    def __init__(self, spectra_list,
+                 labels     = None,
+                 comp       = None,
+                 post_align = False,
+                 alignment  = None
+                 ):
         
-        self.__initialize_collection(spectra_list, labels, comp)
+        self.__initialize_collection(spectra_list, labels, comp, post_align,
+                                     alignment)
         
         return
     
-    
-    def __initialize_collection(self, spectra_list, labels, comp):
+    # start from list of pyscf objects
+    def __initialize_collection(self, spectra_list, labels, comp, post_align,
+                                alignment):
         
         self.spectras = copy.deepcopy(spectra_list)
         
-        if comp is None:
-            self.comp   = None
-            self.labels = copy.deepcopy(labels)
-            self.ref_spectras = None
+        if comp is None:       
+            self.labels = len(spectra_list)*[-1]
+            self.ref_structures = None
+            
         else:
-            self.comp   = copy.deepcopy(comp)
             self.labels = copy.deepcopy(comp.labels)
-            self.ref_spectras = self.get_reference_spectra()
+            self.ref_structures = comp.get_representatives()
         
+        # assign labels
+        for cc, spectra in enumerate(self.spectras):
+            spectra.label = self.labels[cc]
+        
+        if post_align:
+            if alignment is None:
+                alignment = comp.alignment
+        
+            self.ref_spectras = self.align_to_references(self.ref_structures,
+                                                         alignment)
+            
         return
     
-    
+    # return all spectra with given atomic cluster label
     def get_spectra_with_label(self, label):
-        
-        if self.labels is None:
-            return None
-        
-        output = [self.spectras[cc] for cc, lab in enumerate(self.labels)
-                  if lab == label]
-        
-        return output
+        return [sp for sp in self.spectras if sp.label == label]
     
     # get all spectras with a specific label
     def get_mbxas_spectras(self, axis=None, sigma=0.02, npoints=1001, tol=0.01,
@@ -91,49 +101,33 @@ class Spectras():
         
         return E, np.mean(I_list, axis=0)
     
-    # generate iaos given a structure and a basis (assumes FCH)
-    @staticmethod
-    def make_iaos(mol, mo_coeff, mo_occ, minao):
+  
+    # align all spectra to their reference structure
+    def align_to_references(self, ref_structures, alignment, labels=None):
         
-        maxidx = np.where(mo_occ == 1)[0].max()
-        
-        b_ovlp = mol.intor_symmetric('int1e_ovlp')
-        
-        iaos = iao.iao(mol, mo_coeff[:,:maxidx], minao=minao)
-        
-        return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T,b_ovlp,iaos))))
-    
-    def get_reference_spectra(self):
-        
-        assert self.comp is not None, "Can only do this if comp is provided"
-        
-        # get mean structures
-        mean_structures = self.comp.get_mean_structures()
-        
+        if labels is None:
+            labels = self.labels
+        elif isinstance(labels, int):
+            labels = [labels]
+
         # iterate over labels and return the structure closest to mean structure
-        ref_spectras = []
-        for lab in set(self.labels):
+        for lab in set(labels):
             
             if lab == -1: # ignore noise
                 continue
             
-            # get indexes where labels
-            tidx = np.where(self.labels == lab)[0]
+            # get relevant spectra
+            spectras = self.get_spectra_with_label(lab)
             
-            # get them clusters
-            clusters = self.comp.get_clusters_with_label(lab)
+            # get relevant reference structure
+            ref_structure = ref_structures[lab]
             
-            # get distance matrix
-            dists = met.get_simple_distances([mean_structures[lab]], clusters)
+            for spectra in spectras:
+                spectra.align_to_reference(ref_structure, alignment)
             
-            # find actual structure closest to mean structure and spectra
-            ref_idx = tidx[np.argmin(dists)]
-            spectra = self.spectras[ref_idx]
-            
-            ref_spectras.append(spectra)
-        
-        return copy.deepcopy(ref_spectras)
+        return
     
+ 
     # generate a set of IAOS basis 
     def generate_iaos_basis(self, minao="minao"):
         
@@ -169,23 +163,16 @@ class Spectras():
         return np.array(iaos_list), copy.deepcopy(ref_spectras)
     
     
-    def get_feature_vector(self, label=None, alignment=None):
+    def get_feature_vector(self, label=None):
         
         assert label in self.labels and label != -1, "Invalid label provided"
-        
-        # get reference structure
-        ref_structure = self.ref_spectras[label].structure.copy()
         
         energies   = []
         amplitudes = []
         overlaps   = []
         # CMOs       = []
         for spectra in self.get_spectra_with_label(label):
-            
-            # if needed, align to reference
-            if alignment is not None:
-                spectra.align_to_reference(ref_structure, alignment)
-            
+                  
             # calculate overlap
             ovlp = spectra.get_CMO_orth_proj()
             

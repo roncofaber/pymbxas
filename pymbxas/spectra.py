@@ -10,6 +10,8 @@ Created on Mon Jun 26 10:33:37 2023
 import numpy as np
 from functools import reduce
 
+from pyscf.lo import iao, orth
+
 # pymbxas utils
 from pymbxas.build.structure import rotate_structure, ase_to_mole
 from pymbxas.utils.basis import get_AO_permutation, get_l_val
@@ -92,7 +94,7 @@ class Spectra():
         ali_MOs = (inv_A*U).T.dot(self._mo_coeff[AO_permutation])
         
         self.structure = structure
-        self._mo_coeff  = ali_MOs
+        self._mo_coeff = ali_MOs
         self.mol       = mol
         self.amplitude = rot@(self.amplitude)
         
@@ -133,6 +135,17 @@ class Spectra():
         # return CMO proj on LAOs
         return (self.CMO.T@basis_ovlp@lao).T
     
+    
+    # generate iaos given a structure and a basis (assumes FCH)
+    def make_iaos(self, minao="minao"):
+        
+        maxidx = np.where(self._mo_occ == 1)[0].max()
+        
+        b_ovlp = self.mol.intor_symmetric('int1e_ovlp')
+        
+        iaos = iao.iao(self.mol, self._mo_coeff[:,:maxidx], minao=minao)
+        
+        return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T,b_ovlp,iaos))))
     
     def get_mbxas_spectra(self, axis=None, sigma=0.02, npoints=3001, tol=0.01,
                           erange=None, el_label=None):

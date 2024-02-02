@@ -6,14 +6,6 @@ Created on Fri Feb  2 15:32:48 2024
 @author: roncofaber
 """
 
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Jan 30 13:07:36 2024
-
-@author: roncofaber
-"""
-
 import numpy as np
 
 import sea_urchin.clustering.metrics as met
