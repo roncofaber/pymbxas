@@ -67,6 +67,8 @@ class Spectra():
         self._mo_coeff = data.mo_coeff[channel]
         self._mo_occ   = data.mo_occ[channel]
         
+        self._el_labels = None
+        
         return
     
     def rotate_spectra(self, rot, perm, inv, reference=None):
@@ -133,9 +135,20 @@ class Spectra():
     
     
     def get_mbxas_spectra(self, axis=None, sigma=0.02, npoints=3001, tol=0.01,
-                          erange=None):
+                          erange=None, el_label=None):
         
-        erange, spectras = get_mbxas_spectra(self.energies, self.amplitude,
+        if el_label is not None:
+            assert self._el_labels is not None, "first run el. clustering"
+            
+            idxs = self._el_labels == el_label
+            
+            amplitude = self.amplitude[:,idxs]
+            energies  = self.energies[idxs] 
+        else:
+            amplitude = self.amplitude
+            energies  = self.energies
+        
+        erange, spectras = get_mbxas_spectra(energies, amplitude,
                                               sigma=sigma, npoints=npoints,
                                               tol=tol, erange=erange)
 
@@ -162,7 +175,6 @@ class Spectra():
                            mo_occ    = np.zeros((2,len(self.energies))),
                            center    = center,
                            oname     = oname)
-        
         
         return
     

@@ -65,7 +65,7 @@ class Spectras():
     
     # get all spectras with a specific label
     def get_mbxas_spectras(self, axis=None, sigma=0.02, npoints=1001, tol=0.01,
-                          erange=None, label=None):
+                          erange=None, label=None, el_label=None):
         if label is None:
             spectras = self.spectras
         else:
@@ -75,18 +75,19 @@ class Spectras():
         for spectra in spectras:
             E, I = spectra.get_mbxas_spectra(axis=axis, sigma=sigma,
                                              npoints=npoints, tol=tol,
-                                             erange=erange)
+                                             erange=erange, el_label=el_label)
             I_list.append(I)
         
         return E, np.array(I_list)
    
     # get the average spectra
     def get_mbxas_spectra(self, axis=None, sigma=0.02, npoints=1001, tol=0.01,
-                          erange=None, label=None):
+                          erange=None, label=None, el_label=None):
         
         E, I_list = self.get_mbxas_spectras(axis=axis, sigma=sigma,
                                             npoints=npoints, tol=tol,
-                                            erange=erange, label=label)
+                                            erange=erange, label=label,
+                                            el_label=el_label)
         
         return E, np.mean(I_list, axis=0)
     
@@ -173,7 +174,7 @@ class Spectras():
         assert label in self.labels and label != -1, "Invalid label provided"
         
         # get reference structure
-        ref_structure = self.ref_spectras[label].structure
+        ref_structure = self.ref_spectras[label].structure.copy()
         
         energies   = []
         amplitudes = []
