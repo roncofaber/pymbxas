@@ -13,6 +13,10 @@ import sea_urchin.clustering.clusterize as clf
 
 from pymbxas.explorer.node import spectralNode
 
+from sklearn.gaussian_process import GaussianProcessRegressor
+import sklearn.gaussian_process.kernels as sker
+
+#%%
 Ha = 27.2113862161
 
 # wrapper class to predict a spectra
@@ -37,6 +41,12 @@ class MBXASplorer():
         structures = [sp.structure for sp in spectra_list]
         X  = self.metric(structures)
         Xs = self.xscale.fit_transform(X)
+        
+        # read GS data
+        ys_G = self.__read_scale_GS_energy(spectra_list, yscaler)
+        
+        # first, predict GS energy
+        self.kr_g = self.__fit_gs_energy(Xs, ys_G)
 
         # fit each peak
         nodes = []
@@ -70,20 +80,54 @@ class MBXASplorer():
         # scale new input
         Xtest_scaled = self.xscale.transform(Xtest)
         
+        y_G = self.__predict_gs_energy(Xtest_scaled)
+        
         if node is not None:
-            return self.nodes[node].predict(Xtest_scaled)
+            return *self.nodes[node].predict(Xtest_scaled), np.array(y_G)
         
         else:
             
-            y_E, y_A, y_G = [], [], []
+            y_E, y_A = [], []
             
             for node in self.nodes:
                 e, a, g = node.predict(Xtest_scaled)
                 y_E.append(e)
                 y_A.append(a)
-                y_G.append(g)
                 
-        return np.concatenate(y_E), np.concatenate(y_A), np.concatenate(y_G)
+        return np.concatenate(y_E), np.concatenate(y_A), np.array(y_G)
+    
+    def __read_scale_GS_energy(self, spectra_list, yscaler):
+        
+        y_G = []
+        for spectra in spectra_list:
+            y_G.append(spectra.gs_energy)
+            
+        y_G = np.array(y_G)
+            
+        self.yscale_G = clf.generate_scaler(yscaler)
+        
+        ys_G = self.yscale_G.fit_transform(y_G.reshape(-1, 1))
+        
+        return ys_G
+    
+    @staticmethod
+    def __fit_gs_energy(Xs, ys_G):
+        
+        kernel = 3.0 * sker.RBF(
+            length_scale        = 15.0,
+            length_scale_bounds = (1e-3, 1e3)
+            )
+        
+        kr_g = GaussianProcessRegressor(
+            kernel,
+            n_restarts_optimizer = 30
+            ).fit(Xs, ys_G)
+
+        return kr_g
+    
+    def __predict_gs_energy(self, Xtest):
+        gs_energy = self.kr_g.predict(Xtest).reshape(-1, 1)
+        return Ha*self.yscale_G.inverse_transform(gs_energy)
     
     # make class iterable
     def __getitem__(self, index):

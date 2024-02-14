@@ -15,6 +15,12 @@ from pyscf.pbc import gto as pgto
 
 from pymbxas.io.logger import Logger
 from pymbxas.utils.check_keywords import check_pbc
+
+try:
+    import sea_urchin.alignement.align as ali
+    has_SU = True
+except:
+    has_SU = False
 #%%
 
 # convert an ase Atoms object to a mole or cell object for pyscf
@@ -70,7 +76,7 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
     
     return mol
 
-
+# convert a mol object to ase Atoms
 def mole_to_ase(mol):
     
     if mol.unit.startswith("B") or mol.unit.startswith("AU"):
@@ -83,32 +89,10 @@ def mole_to_ase(mol):
         conv*mol.atom_coords()
         )
     
-    
     return structure
-    
 
 # rotate, translate, permute, inverse a structure
-def rotate_structure(structure, rM, reference=None, P=None, inv=1):
+def rotate_structure(structure, rot, tr, perm, inv, rtype):
+    assert has_SU, "Please install Sea Urchin to use this"
+    return ali.align_structure(structure, rot, tr, perm, inv, rtype)
     
-    assert inv == 1 or inv == -1, "WRONG INV"
-    
-    new_structure = structure.copy()
-    
-    dR = np.mean(structure.get_positions(), axis=0)
-    
-    if reference is None:
-        dV = dR
-    elif reference == "origin":
-        dV = [0, 0, 0]
-        dR = [0, 0, 0]
-    else:
-        dV = np.mean(reference.get_positions(), axis=0)
-
-    npos = inv*(structure.get_positions() - dR).dot(rM.T)
-    
-    if P is not None:
-        npos = npos[P]
-    
-    new_structure.set_positions(npos + dV)
-    
-    return new_structure

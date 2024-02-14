@@ -34,8 +34,8 @@ __qcauxdir__   = "/clusterfs/etna/pscratch/subhayan/QCHEM_CODE/qcaux-trunk"
 #     __scratchdir__ = "/tmp"
 
 # set environment
-from .utils.environment import set_qchem_environment
-set_qchem_environment()
+#from .utils.environment import set_qchem_environment
+#set_qchem_environment()
 
 from .spectra  import Spectra
 from .spectras import Spectras

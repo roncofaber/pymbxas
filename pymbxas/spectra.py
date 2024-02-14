@@ -9,6 +9,7 @@ Created on Mon Jun 26 10:33:37 2023
 # data manipulation
 import numpy as np
 from functools import reduce
+import dill, lzma
 
 from pyscf.lo import iao, orth
 
@@ -21,9 +22,9 @@ from pymbxas.io.write import write_data_to_fchk
 # can we use the sea urchin here?
 try:
     import sea_urchin.alignement.align as ali
-    SeaUrchin_exists = True
+    has_SU = True
 except:
-    SeaUrchin_exists = False
+    has_SU = False
 
 # pyscf stuff
 from pyscf import lo
@@ -37,10 +38,14 @@ class Spectra():
                  excitation=0,
                  ):
         
-        # read spectra
-        self.__initialize_spectra(pyscf_obj, excitation)
+        # read spectra from pyscf object
+        if "calculators.pyscf" in str(type(pyscf_obj)):
+            self.__initialize_spectra(pyscf_obj, excitation)
+        else:
+            self.__restart(pyscf_obj)
+        
+        return
 
-    
     # function that reads and initialize the spectra object
     def __initialize_spectra(self, pyscf_obj, excitation):
         
@@ -73,12 +78,44 @@ class Spectra():
         
         return
     
-    def rotate_spectra(self, rot, perm, inv, reference=None):
+    def __restart(self, pyscf_obj):
+        
+        #load a pkl or dict
+        if isinstance(pyscf_obj, dict):
+            self.__dict__ = pyscf_obj.copy()
+        elif isinstance(pyscf_obj, str):
+            self.__dict__ = self.__pkl_to_dict(pyscf_obj)
+            
+        self.make_mol()
+            
+        return
+    
+    def __pkl_to_dict(self, filename):
+        
+        with open(filename, 'rb') as fin:
+            data = fin.read()
+            
+        compressed_data = lzma.decompress(data)
+        data = dill.loads(compressed_data)
+  
+        return data.copy()
+    
+    def transform(self, rot=np.eye(3), tr=np.zeros(3), perm=None,
+                       inv=None, atype=None):
+        
+        # no inversion? Use det of rot #TODO
+        if inv is None:
+            inv = np.round(np.linalg.det(rot))
+        if perm is None:
+            perm = list(range(len(self.structure)))
+        if atype is None:
+            atype = "fastoverlap"
+            print("Assuming FO as type")
         
         # generate rotated structure
-        structure = rotate_structure(self.structure, rot, reference=reference,
-                                     P=perm, inv=inv)
+        structure = rotate_structure(self.structure, rot, tr, perm, inv, atype)
         
+        # convert to mole
         mol = ase_to_mole(structure, verbose=0, **self.calc_settings)
         
         # generate rotation matrix from rotM
@@ -93,6 +130,7 @@ class Spectra():
         # calculate rotated MOs
         ali_MOs = (inv_A*U).T.dot(self._mo_coeff[AO_permutation])
         
+        # reassign variables
         self.structure = structure
         self._mo_coeff = ali_MOs
         self.mol       = mol
@@ -102,16 +140,16 @@ class Spectra():
     
     def align_to_reference(self, reference, alignment, subset=None):
         
-        assert SeaUrchin_exists, "Please, install also Sea Urchin to do this"
+        assert has_SU, "Please, install also Sea Urchin to do this"
         
         if subset is None:
             structure = self.structure
         else:
             structure = self.structure[subset]
         
-        __, __, R, P, I = ali.align_to_reference(structure, reference, alignment)
+        rot, tr, perm, inv, _ = ali.get_RTPI(structure, reference, alignment)
         
-        self.rotate_spectra(R, P, I, reference=reference)
+        self.transform(rot=rot, tr=tr, perm=perm, inv=inv, rtype=alignment["type"])
         
         return
     
@@ -172,6 +210,8 @@ class Spectra():
         
         return erange, spectras
         
+    def get_amplitude_tensor(self):
+        return np.einsum("ij,jk->ikj", self.amplitude, self.amplitude.T)
     
     # get CMOs
     @property
@@ -191,3 +231,37 @@ class Spectra():
         
         return
     
+    # use this to remake mol obj (useful for reloading with dill)
+    def make_mol(self):
+        self.mol = ase_to_mole(self.structure, verbose=0, **self.calc_settings)
+        return
+    
+    def _prepare_for_save(self):
+        """Subclasses can override this to customize saving behavior.
+
+        Returns:
+            dict: A dictionary containing data to be serialized.
+        """
+        data = self.__dict__.copy()
+        del data["mol"]
+        return data
+    
+    def save(self, filename="spectra.pkl"):
+        """Saves the object to a file."""
+        
+        data = self._prepare_for_save()
+        serialized_data = dill.dumps(data)
+
+        # Compress using lzma for space efficiency
+        compressed_data = lzma.compress(serialized_data)
+
+        # Save to file
+        with open(filename, 'wb') as fout:
+            fout.write(compressed_data)
+            
+        return
+    
+    # use it to return a copy of the spectra
+    def copy(self):
+        data = self._prepare_for_save()
+        return Spectra(data)

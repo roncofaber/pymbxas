@@ -7,14 +7,16 @@ Created on Wed Jul  5 12:08:17 2023
 """
 
 import numpy as np
-
-
 import copy
+import dill, lzma
+
+from pymbxas import Spectra
 
 # can we use the sea urchin here?
 try:
     # import sea_urchin.alignement.align as ali
     import sea_urchin.clustering.metrics as met
+    import sea_urchin.alignement.align as ali
     SeaUrchin_exists = True
 except:
     SeaUrchin_exists = False
@@ -37,8 +39,11 @@ class Spectras():
                  alignment  = None
                  ):
         
-        self.__initialize_collection(spectra_list, labels, comp, post_align,
+        if isinstance(spectra_list, list):
+            self.__initialize_collection(spectra_list, labels, comp, post_align,
                                      alignment)
+        else:
+            self.__restart(spectra_list)
         
         return
     
@@ -50,11 +55,8 @@ class Spectras():
         
         if comp is None:       
             self.labels = len(spectra_list)*[-1]
-            self.ref_structures = None
-            
         else:
             self.labels = copy.deepcopy(comp.labels)
-            self.ref_structures = comp.get_representatives()
         
         # assign labels
         for cc, spectra in enumerate(self.spectras):
@@ -64,10 +66,33 @@ class Spectras():
             if alignment is None:
                 alignment = comp.alignment
         
-            self.ref_spectras = self.align_to_references(self.ref_structures,
-                                                         alignment)
+            self.align_labels_to_mean_structures(alignment)
             
         return
+    
+    def __restart(self, spectra_obj):
+        
+        #load a pkl or dict
+        if isinstance(spectra_obj, dict):
+            self.__dict__ = spectra_obj.copy()
+        elif isinstance(spectra_obj, str):
+            self.__dict__ = self.__pkl_to_dict(spectra_obj)
+            
+        spectras = [Spectra(ii) for ii in self.spectras]
+        
+        self.spectras = spectras
+            
+        return
+    
+    def __pkl_to_dict(self, filename):
+        
+        with open(filename, 'rb') as fin:
+            data = fin.read()
+            
+        compressed_data = lzma.decompress(data)
+        data = dill.loads(compressed_data)
+  
+        return data.copy()
     
     # return all spectra with given atomic cluster label
     def get_spectra_with_label(self, label):
@@ -101,30 +126,42 @@ class Spectras():
         
         return E, np.mean(I_list, axis=0)
     
-  
-    # align all spectra to their reference structure
-    def align_to_references(self, ref_structures, alignment, labels=None):
+    def align_labels_to_mean_structures(self, alignment, labels=None):
         
-        if labels is None:
+        if labels is None: # get comp labels
             labels = self.labels
-        elif isinstance(labels, int):
-            labels = [labels]
-
-        # iterate over labels and return the structure closest to mean structure
+            
         for lab in set(labels):
             
-            if lab == -1: # ignore noise
+            if lab == -1:
                 continue
             
-            # get relevant spectra
-            spectras = self.get_spectra_with_label(lab)
-            
-            # get relevant reference structure
-            ref_structure = ref_structures[lab]
-            
-            for spectra in spectras:
-                spectra.align_to_reference(ref_structure, alignment)
-            
+            self.align_label_to_mean_structure(lab, alignment)
+        
+        return
+    
+    def align_label_to_mean_structure(self, label, alignment):
+        
+        # assert isinstance(label, int)
+        
+        # get spectras and structures
+        spectras   = self.get_spectra_with_label(label)
+        structures = [sp.structure for sp in spectras]
+        
+        # calculate mean structure
+        
+        __, mstrus = ali.align_to_mean_structure(structures, alignment,
+                                                 start_structure = structures[0])
+        
+        mean_structure = mstrus[-1]
+        
+        # get alignments to mean structure
+        rot, tr, perm, inv, dh = ali.get_RTPI(structures, mean_structure, alignment)
+        
+        for cc, spectra in enumerate(spectras):
+            spectra.transform(rot=rot[cc], tr=tr[cc], perm=perm[cc],
+                              inv=inv[cc], atype=alignment["type"])
+        
         return
     
  
@@ -189,3 +226,33 @@ class Spectras():
     
     def __iter__(self):
         return iter(self.spectras)
+    
+    def _prepare_for_save(self):
+        
+        data = self.__dict__.copy()
+        
+        spectras = [sp._prepare_for_save() for sp in self.spectras]
+        
+        data["spectras"] = spectras
+        
+        return data
+    
+    def save(self, filename="spectras.pkl"):
+        """Saves the object to a file."""
+        
+        data = self._prepare_for_save()
+        serialized_data = dill.dumps(data)
+
+        # Compress using lzma for space efficiency
+        compressed_data = lzma.compress(serialized_data)
+
+        # Save to file
+        with open(filename, 'wb') as fout:
+            fout.write(compressed_data)
+            
+        return
+    
+    # use it to return a copy of the spectra
+    def copy(self):
+        data = self._prepare_for_save()
+        return Spectras(data)
