@@ -9,9 +9,9 @@ Created on Mon Jun 26 10:33:37 2023
 # data manipulation
 import numpy as np
 from functools import reduce
-import dill, lzma
+import dill
 
-from pyscf.lo import iao, orth
+
 
 # pymbxas utils
 from pymbxas.build.structure import rotate_structure, ase_to_mole
@@ -28,6 +28,7 @@ except:
 
 # pyscf stuff
 from pyscf import lo
+from pyscf.lo import iao, orth
 
 #%%
 
@@ -91,18 +92,17 @@ class Spectra():
         return
     
     def __pkl_to_dict(self, filename):
-        
         with open(filename, 'rb') as fin:
-            data = fin.read()
-            
-        compressed_data = lzma.decompress(data)
-        data = dill.loads(compressed_data)
-  
-        return data.copy()
+            data = dill.load(fin)
+        return data
     
-    def transform(self, rot=np.eye(3), tr=np.zeros(3), perm=None,
+    def transform(self, rot=None, tr=None, perm=None,
                        inv=None, atype=None):
         
+        if rot is None:
+            rot = np.eye(3)
+        if tr is None:
+            tr = np.zeros(3)
         # no inversion? Use det of rot #TODO
         if inv is None:
             inv = np.round(np.linalg.det(rot))
@@ -117,7 +117,7 @@ class Spectra():
         
         # convert to mole
         mol = ase_to_mole(structure, verbose=0, **self.calc_settings)
-        
+                        
         # generate rotation matrix from rotM
         U = mol.ao_rotation_matrix(rot)
         
@@ -134,7 +134,7 @@ class Spectra():
         self.structure = structure
         self._mo_coeff = ali_MOs
         self.mol       = mol
-        self.amplitude = rot@(self.amplitude)
+        self.amplitude = inv*rot@(self.amplitude)
         
         return
     
@@ -149,7 +149,9 @@ class Spectra():
         
         rot, tr, perm, inv, _ = ali.get_RTPI(structure, reference, alignment)
         
-        self.transform(rot=rot, tr=tr, perm=perm, inv=inv, rtype=alignment["type"])
+        assert inv in [-1, 1]
+        
+        self.transform(rot=rot, tr=tr, perm=perm, inv=inv, atype=alignment["type"])
         
         return
     
@@ -250,14 +252,10 @@ class Spectra():
         """Saves the object to a file."""
         
         data = self._prepare_for_save()
-        serialized_data = dill.dumps(data)
-
-        # Compress using lzma for space efficiency
-        compressed_data = lzma.compress(serialized_data)
-
+      
         # Save to file
         with open(filename, 'wb') as fout:
-            fout.write(compressed_data)
+            dill.dump(data, fout)
             
         return
     

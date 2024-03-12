@@ -79,14 +79,9 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
 # convert a mol object to ase Atoms
 def mole_to_ase(mol):
     
-    if mol.unit.startswith("B") or mol.unit.startswith("AU"):
-        conv = ase.units.Bohr
-    else:
-        conv = 1.
-        
     structure = ase.Atoms(
         mol.elements,
-        conv*mol.atom_coords()
+        mol.atom_coords(unit="Angstrom")
         )
     
     return structure

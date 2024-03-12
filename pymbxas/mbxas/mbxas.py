@@ -23,14 +23,12 @@ def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None
     # calculate many body overlap
     mb_overlap = fch_calc.mo_coeff[channel].T@basis_overlap@gs_calc.mo_coeff[channel]
     
-    # plt.figure();plt.imshow(mb_overlap**2)
-    
     # index of excited oribtal (first 0 element)
     exc_orb_idx = np.where(fch_calc.mo_occ[channel] == 0)[0][0]
     
     # define indexes of occupied and unoccupied orbitals for GS and FCH
     occ_idxs_fch = np.where(fch_calc.mo_occ[channel] == 1)[0]
-    occ_idxs_gs = np.delete(np.where(gs_calc.mo_occ[channel] == 1)[0], gs_orb_idx)
+    occ_idxs_gs  = np.delete(np.where(gs_calc.mo_occ[channel] == 1)[0], gs_orb_idx)
     uno_idxs_fch = np.where(fch_calc.mo_occ[channel] == 0)[0][1:] # remove first unocc as it's the CH
     
     # extract from the MB matrix only what is occupied

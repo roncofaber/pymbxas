@@ -83,28 +83,29 @@ class MBXASplorer():
         y_G = self.__predict_gs_energy(Xtest_scaled)
         
         if node is not None:
-            return *self.nodes[node].predict(Xtest_scaled), np.array(y_G)
+            return *self.nodes[node].predict(Xtest_scaled), np.squeeze(y_G)
         
         else:
             
             y_E, y_A = [], []
             
             for node in self.nodes:
-                e, a, g = node.predict(Xtest_scaled)
+                e, a = node.predict(Xtest_scaled)
                 y_E.append(e)
                 y_A.append(a)
                 
-        return np.concatenate(y_E), np.concatenate(y_A), np.array(y_G)
+            y_E = np.squeeze(np.concatenate(y_E))
+            y_A = np.squeeze(np.concatenate(y_A))
+        
+        y_G = np.squeeze(y_G)
+                
+        return y_E, y_A, y_G
     
     def __read_scale_GS_energy(self, spectra_list, yscaler):
         
-        y_G = []
-        for spectra in spectra_list:
-            y_G.append(spectra.gs_energy)
-            
-        y_G = np.array(y_G)
-            
-        self.yscale_G = clf.generate_scaler(yscaler)
+        y_G = np.array([sp.gs_energy for sp in spectra_list])
+  
+        self.yscale_G = clf.generate_scaler("none")
         
         ys_G = self.yscale_G.fit_transform(y_G.reshape(-1, 1))
         

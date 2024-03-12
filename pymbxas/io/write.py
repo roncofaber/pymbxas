@@ -91,9 +91,9 @@ except:
 def write_data_to_fchk(mol, mo_coeff=None, mo_occ=None, density=False,
                        mo_energy=None, oname="tmp.fchk",  center=False):
     
-    if not is_mokit:
-        print("No MOKIT")
-        return
+    # if not is_mokit:
+    #     print("No MOKIT")
+    #     return
     
     directory = os.path.dirname(oname)
     if directory and not os.path.exists(directory):

@@ -8,7 +8,7 @@ Created on Wed Jul  5 12:08:17 2023
 
 import numpy as np
 import copy
-import dill, lzma
+import dill
 
 from pymbxas import Spectra
 
@@ -34,13 +34,12 @@ class Spectras():
     
     def __init__(self, spectra_list,
                  labels     = None,
-                 comp       = None,
                  post_align = False,
                  alignment  = None
                  ):
         
         if isinstance(spectra_list, list):
-            self.__initialize_collection(spectra_list, labels, comp, post_align,
+            self.__initialize_collection(spectra_list, labels, post_align,
                                      alignment)
         else:
             self.__restart(spectra_list)
@@ -48,24 +47,24 @@ class Spectras():
         return
     
     # start from list of pyscf objects
-    def __initialize_collection(self, spectra_list, labels, comp, post_align,
+    def __initialize_collection(self, spectra_list, labels, post_align,
                                 alignment):
         
         self.spectras = copy.deepcopy(spectra_list)
         
-        if comp is None:       
+        if labels is None:
             self.labels = len(spectra_list)*[-1]
         else:
-            self.labels = copy.deepcopy(comp.labels)
+            self.labels = labels.copy()
+
         
         # assign labels
         for cc, spectra in enumerate(self.spectras):
             spectra.label = self.labels[cc]
         
+        self.__aligned = False
         if post_align:
-            if alignment is None:
-                alignment = comp.alignment
-        
+            assert alignment is not None, "Provide an alignment"
             self.align_labels_to_mean_structures(alignment)
             
         return
@@ -85,14 +84,9 @@ class Spectras():
         return
     
     def __pkl_to_dict(self, filename):
-        
         with open(filename, 'rb') as fin:
-            data = fin.read()
-            
-        compressed_data = lzma.decompress(data)
-        data = dill.loads(compressed_data)
-  
-        return data.copy()
+            data = dill.load(fin)
+        return data
     
     # return all spectra with given atomic cluster label
     def get_spectra_with_label(self, label):
@@ -137,19 +131,18 @@ class Spectras():
                 continue
             
             self.align_label_to_mean_structure(lab, alignment)
+            
+        self.__aligned = True
         
         return
     
     def align_label_to_mean_structure(self, label, alignment):
-        
-        # assert isinstance(label, int)
         
         # get spectras and structures
         spectras   = self.get_spectra_with_label(label)
         structures = [sp.structure for sp in spectras]
         
         # calculate mean structure
-        
         __, mstrus = ali.align_to_mean_structure(structures, alignment,
                                                  start_structure = structures[0])
         
@@ -164,40 +157,53 @@ class Spectras():
         
         return
     
- 
-    # generate a set of IAOS basis 
-    def generate_iaos_basis(self, minao="minao"):
+    def get_mean_structure(self, label):
         
-        assert self.comp is not None, "Can only do this if comp is provided"
-        
-        mean_structures = self.comp.get_mean_structures()
-        
-        iaos_list    = []
-        ref_spectras = []
-        for lab in set(self.labels):
+        # check alignment was done
+        assert self.__aligned, "You might want to align the structures before..."
             
-            if lab == -1: # ignore noise
-                continue
-            
-            # get indexes where labels
-            tidx = np.where(self.labels == lab)[0]
-            
-            # get them clusters
-            clusters = self.comp.get_clusters_with_label(lab)
-            
-            # get distance matrix
-            dists = met.get_simple_distances([mean_structures[lab]], clusters)
-            
-            # find actual structure closest to mean structure and spectra
-            ref_idx = tidx[np.argmin(dists)]
-            spectra = self.spectras[ref_idx]
-            
-            # make the iaos
-            iaos = self.make_iaos(spectra.mol, spectra._mo_coeff, spectra._mo_occ, minao)
-            iaos_list.append(iaos)
-            ref_spectras.append(spectra)
+        # get spectras and structures
+        spectras   = self.get_spectra_with_label(label)
+        structures = [sp.structure for sp in spectras]
 
-        return np.array(iaos_list), copy.deepcopy(ref_spectras)
+        positions = [cc.get_positions() for cc in structures]
+
+        mean_structure = structures[0].copy()
+        mean_structure.set_positions(np.mean(positions, axis=0))
+
+        return mean_structure
+    
+ 
+    # # generate a set of IAOS basis 
+    # def generate_iaos_basis(self, minao="minao"):
+        
+    #     iaos_list    = []
+    #     ref_spectras = []
+    #     for lab in set(self.labels):
+            
+    #         if lab == -1: # ignore noise
+    #             continue
+            
+    #         # get indexes where labels
+    #         tidx = np.where(self.labels == lab)[0]
+            
+    #         # get them clusters
+    #         clusters = self.comp.get_clusters_with_label(lab)
+            
+    #         # get distance matrix
+    #         mean_structure = self.get_mean_structure(lab)
+    #         dists = met.get_simple_distances(mean_structure, clusters)
+            
+    #         # find actual structure closest to mean structure and spectra
+    #         ref_idx = tidx[np.argmin(dists)]
+    #         spectra = self.spectras[ref_idx]
+            
+    #         # make the iaos
+    #         iaos = self.make_iaos(spectra.mol, spectra._mo_coeff, spectra._mo_occ, minao)
+    #         iaos_list.append(iaos)
+    #         ref_spectras.append(spectra)
+
+    #     return np.array(iaos_list), copy.deepcopy(ref_spectras)
     
     
     def get_feature_vector(self, label=None):
@@ -241,18 +247,14 @@ class Spectras():
         """Saves the object to a file."""
         
         data = self._prepare_for_save()
-        serialized_data = dill.dumps(data)
-
-        # Compress using lzma for space efficiency
-        compressed_data = lzma.compress(serialized_data)
-
+      
         # Save to file
         with open(filename, 'wb') as fout:
-            fout.write(compressed_data)
+            dill.dump(data, fout)
             
         return
     
-    # use it to return a copy of the spectra
+    # use it to return a copy of the spectra collection object
     def copy(self):
         data = self._prepare_for_save()
         return Spectras(data)
