@@ -108,9 +108,14 @@ class AIMDTrajWriter():
         
         data = aimd["self"]
         
+        print(data._step)
+        
         # if not multiple, do nothing unless is last frame
-        if data._step % self.nstep != 0 and data._step != data.steps:
-            return
+        if data._step % self.nstep != 0:
+            if data._step == data.steps:
+                pass
+            else:
+                return
         
         # convert mol to ase
         atoms = mole_to_ase(data.mol)
