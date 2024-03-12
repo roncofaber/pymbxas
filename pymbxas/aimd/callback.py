@@ -84,8 +84,6 @@ class AIMDTrajWriter():
         
         data = aimd["self"]
         
-        print(data._step)
-        
         # if not multiple, do nothing unless is last frame
         if data._step % self.nstep != 0:
             if data._step == data.steps:
