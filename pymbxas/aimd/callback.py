@@ -8,6 +8,8 @@ Created on Tue Mar 12 15:36:48 2024
 
 # ase stuff
 import ase
+import ase.visualize
+from ase.calculators.singlepoint import SinglePointCalculator
 
 # system stuff
 import os
@@ -104,5 +106,74 @@ class AIMDTrajWriter():
         
         if self.data_output is not None:
             self._write_data(data)
+        return
+    
+# class to callback a geometry optimization
+class OptimizerTraj():
+    
+    def __init__(self, write=True, oname="optimization.xyz", append=False):
+        
+        self._traj   = []
+        self.oname  = oname
+        self._write = write
+        
+        if write and os.path.exists(oname) and not append:
+            os.remove(oname)
+            
+        return
+    
+    # function that is called by the optimizer
+    def __call__(self, opt):
+
+        atoms = mole_to_ase(opt["mol"])
+        atoms.info["etot"] = opt["energy"]
+        
+        # assign energy as single point calc #TODO expand with forces and such
+        calc = SinglePointCalculator(atoms, energy=opt["energy"])
+        atoms.set_calculator(calc)
+        
+        # update optimizer internal data
+        self.append(atoms)
+        self.set_mol(opt["mol"], atoms)
+        
+        # write output if specified
+        if self._write:
+            ase.io.write(self.oname, atoms, append=True)
         
         return
+    
+    def set_mol(self, mol, atoms=None):
+        self._mol   = mol
+        
+        if atoms is None:
+            atoms = mole_to_ase(mol)
+        else:
+            atoms = atoms
+        self._atoms = atoms
+        return
+    
+    def append(self, element):
+        self._traj.append(element)
+        return
+    
+    def view(self):
+        ase.visualize.view(self)
+        return
+    
+    # make class iterable
+    def __getitem__(self, index):
+        return self._traj[index]
+    
+    def __iter__(self):
+        return iter(self._traj)
+    
+    # get elements
+    @property
+    def mol(self):
+        return self._mol
+    @property
+    def traj(self):
+        return self._traj
+    @property
+    def atoms(self):
+        return self._atoms
