@@ -77,11 +77,12 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
     return mol
 
 # convert a mol object to ase Atoms
-def mole_to_ase(mol):
+def mole_to_ase(mol, units="Angstrom", **kwargs):
     
     structure = ase.Atoms(
         mol.elements,
-        mol.atom_coords(unit="Angstrom")
+        mol.atom_coords(unit=units),
+        **kwargs
         )
     
     return structure

@@ -8,6 +8,7 @@ Created on Tue Mar 12 15:36:48 2024
 
 # ase stuff
 import ase
+from ase import units
 import ase.visualize
 from ase.calculators.singlepoint import SinglePointCalculator
 
@@ -17,6 +18,9 @@ import os
 from pymbxas.build.structure import mole_to_ase
 
 #%%
+
+au_2_fs = 0.02418884254
+
 # class to add to a AIMD callback to print traj every n steps as ase atoms xyz
 class AIMDTrajWriter():
     
@@ -102,6 +106,14 @@ class AIMDTrajWriter():
         atoms.info["etot"]  = data.epot + data.ekin
         atoms.info["time"]  = data.time
         
+        # set velocity
+        atoms.set_velocities(data.veloc*units.Bohr/(au_2_fs*units.fs))
+        
+        # assign energy as single point calc #TODO expand with forces and such
+        calc = SinglePointCalculator(atoms, energy=data.epot*units.Ha)
+        atoms.set_calculator(calc)
+        
+        # write traj
         ase.io.write(self.oname, atoms, append=True)
         
         if self.data_output is not None:
@@ -129,7 +141,7 @@ class OptimizerTraj():
         atoms.info["etot"] = opt["energy"]
         
         # assign energy as single point calc #TODO expand with forces and such
-        calc = SinglePointCalculator(atoms, energy=opt["energy"])
+        calc = SinglePointCalculator(atoms, energy=opt["energy"]*units.Ha)
         atoms.set_calculator(calc)
         
         # update optimizer internal data
