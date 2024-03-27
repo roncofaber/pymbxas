@@ -42,34 +42,43 @@ def geometry_optimization(pyscf_calc, opt_type="geometric", maxsteps=100,
     
     return opt
 
-# run aimd calculation
-def aimd_run(pyscf_calc, T, dt, nsteps, ofreq=1, oname="aimd_traj.xyz",
-             output="output.log"):
+class AIMD_solver():
     
-    # run GS calc
-    if not pyscf_calc.converged:
-        pyscf_calc.kernel()
+    def __init__(self, pyscf_calc, T, dt, nsteps, ofreq=1, oname="aimd_traj.xyz",
+                 output="output.log", fixcom=True, fixrot=True):
+        
+        # run GS calc
+        if not pyscf_calc.converged:
+            pyscf_calc.kernel()
+        
+        # initialize velocity
+        init_veloc = MaxwellBoltzmannVelocity(pyscf_calc.mol, T=T)
+
+        # make a logger
+        self.logger = AIMDTrajWriter(
+            oname        = oname, # name output traj
+            nstep        = ofreq,    # frequency at which traj is written
+            data_output  = output, # also write output
+            append       = False # append to existing traj
+            )
+        
+        # make scanner
+        scanner = pyscf_calc.as_scanner()
+
+        self.integrator = NVTBerendson(scanner,
+                                  dt    = dt,
+                                  steps = nsteps,
+                                  T     = T,
+                                  taut  = 10*dt,
+                                  veloc =  init_veloc,
+                                  callback = self.logger,
+                                  fixrot = fixrot,
+                                  fixcom = fixcom
+                                  )
+        
+        return
     
-    # initialize velocity
-    init_veloc = MaxwellBoltzmannVelocity(pyscf_calc.mol, T=T)
-
-    # make a logger
-    logger = AIMDTrajWriter(
-        oname        = oname, # name output traj
-        nstep        = ofreq,    # frequency at which traj is written
-        data_output  = output, # also write output
-        append       = False # append to existing traj
-        )
-
-    aimd_calc = NVTBerendson(pyscf_calc,
-                            dt    = dt,
-                            steps = nsteps,
-                            T     = T,
-                            taut  = 50*dt,
-                            veloc =  init_veloc,
-                            callback = logger,
-                            )
-
-    aimd_calc.run()
-    
-    return aimd_calc
+    # run AIMD
+    def run(self):
+        self.integrator.run()
+        return
