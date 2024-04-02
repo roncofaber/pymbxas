@@ -41,10 +41,6 @@ class Excitation(object):
         self.output = {}
         self.data   = {}
         
-        # make it work even if it uses GPU
-        if self.oset["is_gpu"]:
-            gs_data = gs_data.to_gpu()
-        
         # find index of orbital to excite
         self.orb_idx = find_1s_orbitals_pyscf(gs_data.mol,
                                               gs_data.mo_coeff[channel],
@@ -52,6 +48,10 @@ class Excitation(object):
                                               gs_data.mo_occ[channel],
                                               [ato_idx],
                                               check_deg=False)
+        
+        # make it work even if it uses GPU
+        if self.oset["is_gpu"]:
+            gs_data = gs_data.to_gpu()
         
         if len(self.orb_idx) > 1:
             self.logger.error("It seems that the atomic orbitals are still delocalized.")
