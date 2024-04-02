@@ -68,6 +68,6 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
         try:
             calc = calc.to_gpu()
         except ImportError:
-            print("NO GPU CODE INSTALLED")        
-        
+            raise RuntimeError("CuPy is required for GPU calculations. Please install it.") 
+            
     return calc
