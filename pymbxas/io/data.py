@@ -7,7 +7,11 @@ Created on Wed Aug  2 15:15:11 2023
 """
 
 import numpy as np
-import cupy as cp
+
+try:
+    import cupy as cp
+except:
+    pass # no GPU stuff
 
 from pyscf import gto
 from io import StringIO
