@@ -30,12 +30,12 @@ class Geometry_optimizer():
         write (bool, optional): Whether to write trajectory to a file. Defaults to True.
         oname (str, optional): Output filename. Defaults to "optimization.xyz".
         append (bool, optional): Whether to append to an existing file. Defaults to False.
-        density_fit (bool, optional): Whether to use density fitting for the calculation. Defaults to True.
+        density_fit (bool, optional): Whether to use density fitting for the calculation. Defaults to False.
     """
     
     def __init__(self, pyscf_calc, opt_type="geometric",
                  write=True, oname="optimization.xyz", append=False,
-                 density_fit=True):
+                 density_fit=False):
         
         self.opt_type = opt_type
         

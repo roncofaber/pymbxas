@@ -291,7 +291,7 @@ class PySCF_mbxas():
         
         mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
         
-        self.logger.info("{} loc: {}".format(loc_type, s1_orbitals[1]))
+        self.logger.info("Localization with {}: {}".format(loc_type, s1_orbitals[1]))
         
         self._used_loc = True
         
