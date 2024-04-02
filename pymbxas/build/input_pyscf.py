@@ -10,9 +10,6 @@ Created on Tue Aug  8 17:05:13 2023
 from pyscf import scf, dft
 import pyscf.pbc as pypbc
 
-# check for modules
-import imp
-
 #%%
 
 def make_density_fitter(mol, pbc, cderi=False):
@@ -69,7 +66,6 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
     # add GPU compatibility
     if gpu:
         try:
-            imp.find_module('gpu4pyscf')
             calc = calc.to_gpu()
         except ImportError:
             print("NO GPU CODE INSTALLED")        
