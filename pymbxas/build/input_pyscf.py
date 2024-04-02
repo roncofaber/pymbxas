@@ -7,12 +7,11 @@ Created on Tue Aug  8 17:05:13 2023
 """
 
 # pyscf stuff
-from pyscf import gto, scf, dft
+from pyscf import scf, dft
 import pyscf.pbc as pypbc
-from pyscf.scf.addons import mom_occ
 
-# pymbxas modules
-from pymbxas.build.structure import ase_to_mole
+# check for modules
+import imp
 
 #%%
 
@@ -33,21 +32,31 @@ def make_density_fitter(mol, pbc, cderi=False):
     return df_obj
 
 # Function to make a pyscf calculator that both work with PBC and not.
-def make_pyscf_calculator(mol, xc, pbc=False, solvent=None, dens_fit=None,
-                          calc_name=None, save=False):
+def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None,
+                          dens_fit=None, calc_name=None, save=False, gpu=False):
     
+    # with PBC
     if pbc:
-        calc = pypbc.dft.UKS(mol, xc=xc).density_fit()
+        calc = getattr(pypbc.dft, calc_type)(mol, xc=xc).density_fit()
         
         # density fit object is string
         if dens_fit is not None:
             # calc.with_df._cderi = 'saved_cderi.h5'
             calc.with_df = dens_fit
-            
-    else:
-        # generate KS calculator
-        calc = mol.UKS(xc=xc)
     
+    # no PBC
+    else:
+        
+        # generate calculator
+        if "HF" in calc_type.upper():
+            if xc is not None:
+                print("XC keyword ignored.")
+            calc = getattr(scf, calc_type)(mol)
+        elif "KS" in calc_type.upper():
+            if xc is None:
+                xc = "LDA" #default to LDA
+            calc = getattr(dft, calc_type)(mol, xc=xc)
+        
     # add solvent treatment
     if solvent is not None:
         calc = calc.DDCOSMO()
@@ -57,5 +66,12 @@ def make_pyscf_calculator(mol, xc, pbc=False, solvent=None, dens_fit=None,
     if isinstance(calc_name, str) and save:
        calc.chkfile = '{}.chkfile'.format(calc_name)
     
-    
+    # add GPU compatibility
+    if gpu:
+        try:
+            imp.find_module('gpu4pyscf')
+            calc = calc.to_gpu()
+        except ImportError:
+            print("NO GPU CODE INSTALLED")        
+        
     return calc

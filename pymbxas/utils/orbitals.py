@@ -9,6 +9,8 @@ Created on Thu Jul 13 15:55:09 2023
 """
 
 import numpy as np
+import cupy as cp
+
 from .basis import get_basis_set_info
 #%%
 
@@ -89,6 +91,9 @@ def find_1s_orbitals_pyscf(molecule, coefficients, energies, occupations,
     
             # find indexes where orbital has weight
             rel_idxs = np.where(orb2 > 0.3*np.max(orb2))[0]
+            
+            if isinstance(rel_idxs, cp.ndarray):
+                rel_idxs = rel_idxs.get()
     
             rel_labels = ao_labels[rel_idxs]
             # there is weight on our orbital of interest

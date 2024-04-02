@@ -63,7 +63,7 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
             spin = spin,
             verbose = verbose,
             stdout = Logger(print_output),
-            max_memory = 0,
+            max_memory = 24000,
             unit = 'Angstrom',
             symmetry = symmetry,
             )

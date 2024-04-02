@@ -620,34 +620,6 @@ class NVTBerendson(_Integrator):
         self.veloc = self.veloc * scl_temp
         return
     
-    # def _zero_rotation(self):
-    #     "Sets the total angular momentum to zero by counteracting rigid rotations."
-
-    #     # Save initial temperature
-    #     temp0 = self.temperature()
-        
-    #     atoms = mole_to_ase(self.mol, units="Bohr", velocities=self.veloc)
-
-    #     # Find the principal moments of inertia and principal axes basis vectors
-    #     Ip, basis = atoms.get_moments_of_inertia(vectors=True)
-        
-    #     # Calculate the total angular momentum and transform to principal basis
-    #     Lp = np.dot(basis, atoms.get_angular_momentum())
-        
-    #     # Calculate the rotation velocity vector in the principal basis, avoiding
-    #     # zero division, and transform it back to the cartesian coordinate system
-    #     omega = np.dot(np.linalg.inv(basis), np.select([Ip > 0], [Lp / Ip]))
-        
-    #     # We subtract a rigid rotation corresponding to this rotation vector
-    #     com = atoms.get_center_of_mass()
-    #     positions = atoms.get_positions()
-    #     positions -= com  # translate center of mass to origin
-    #     velocities = atoms.get_velocities()
-        
-    #     self.veloc = velocities - np.cross(omega, positions)
-        
-    #     return
-    
     # counteract rotations of the molecule
     def _zero_rotation(self):  
     
