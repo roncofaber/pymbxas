@@ -1,10 +1,11 @@
-<div align="left">
-  <img src="https://gitlab.com/uploads/-/system/project/avatar/47099716/pymbxas2_1_.png" height="80px"/>
-</div>PyMBXAS: Python-based MBXAS implementation
+<div align="center">
+  <img src="https://gitlab.com/uploads/-/system/project/avatar/47099716/pymbxas2_1_.png" height="120px"/>
+</div>
+
+PyMBXAS: Python-based MBXAS implementation
 -----------------------------------------------
 
-PyMBXAS is a package for setting up, manipulating,
-running and visualizing MBXAS calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
+PyMBXAS is a package for setting up, manipulating, running and visualizing MBXAS calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
 PyMBXAS leverages the [PySCF  electronic structure code](https://github.com/pyscf/pyscf) and the [Atomic Simulation Environment (ASE)](https://wiki.fysik.dtu.dk/ase/).
 
 ### Requirements
@@ -51,6 +52,30 @@ obj = PySCF_mbxas(
 
 # run calculation (GS + FCH + XCH)
 obj.kernel(to_excite)
+```
+Output:
+```
+[10:52:59] |----------------------------------|
+           |                                  |
+           |>>>>>>   Starting PyMBXAS   <<<<<<|
+           |                                  |
+           |       ver  0.2.0a | 04 Apr. 2024 |
+           |----------------------------------|
+        
+[10:52:59] |Started a new GS calculation
+[10:53:03] |IBO localization : [3, 4, 2, 0, 1]
+[10:53:03] |GS finished in 4.1 s.
+
+[10:53:03] |-----> Exciting N  atom # 3 <-----|
+[10:53:03] |>>> Started FCH calculation.
+[10:53:08] |>>> FCH finished in 4.7 s.
+[10:53:08] |>>> Started XCH calculation.
+[10:53:12] |>>> XCH finished in 4.5 s.
+[10:53:12] |>>> MBXAS finished in 0.0 s [✓].
+[10:53:12] |----- Excitation successful! -----|
+
+[10:53:12] |Saved everything as pyscf_obj.pkl
+[10:53:12] |PyMBXAS finished successfully!
 ```
 
 The spectra can then be obtained with:
