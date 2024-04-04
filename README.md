@@ -1,129 +1,76 @@
-## PyMBXAS
+<div align="left">
+  <img src="https://gitlab.com/uploads/-/system/project/avatar/47099716/pymbxas2_1_.png" height="80px"/>
+</div>PyMBXAS: Python-based MBXAS implementation
+-----------------------------------------------
 
-PyMBXAS is a set of tools and Python modules for setting up, manipulating,
-running, visualizing and analyzing CleaRIXS for Q-chem.
+PyMBXAS is a package for setting up, manipulating,
+running and visualizing MBXAS calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
+PyMBXAS leverages the [PySCF  electronic structure code](https://github.com/pyscf/pyscf) and the [Atomic Simulation Environment (ASE)](https://wiki.fysik.dtu.dk/ase/).
 
 ### Requirements
-You need both Q-Chem and CleaRIXS installed on your device.
-
-Find the newest CleaRIXS release:
->https://github.com/subhayanroychoudhury/CleaRIXS
+You need to have both PySCF and ASE installed in your Python environment. If you want to use GPU capabilities make sure to install [gpu4pyscf](https://github.com/pyscf/gpu4pyscf).
 
 ### Usage
-Setting up a full calculation is as easy very easy. For Qchem do:
+To run a MBXAS calculation, you just need to set up the PySCF_mbxas object:
+
 ```python
-import ase
-import ase.build
-import matplotlib.pyplot as plt
-from pymbxas.calculators.qchem import Qchem_mbxas
-
-# build molecule
-molecule = ase.build.molecule("H2O")
-
-# set up parameters
-charge       = 0
-multiplicity = 1
-qchem_params = {
-    "jobtype"      : "sp",
-    "exchange"     : "B3LYP",
-    "basis"        : "def2-tzvpd",
-    "unrestricted" : True,
-    "symmetry"     : False,
-    "sym_ignore"   : True,
-}
-
-# run all calculations
-obj = Qchem_mbxas(
-    molecule,
-    charge,
-    multiplicity,
-    qchem_params = qchem_params,
-    excitation   = 0, #excite 0th atom --> code automatically finds the relevant 1s orbital
-    target_dir   = "water", # specify name of target directory with save files
-    )
-
-# Obtained broadened MBXAS spectra
-X, Y = obj.get_mbxas_spectra()
-
-# Plot spectra
-plt.figure()
-plt.plot(X, Y)
-plt.show()
-
-```
-
-For PySCF do this instead (WIP: merge both to have same data structure)
-```python
-
-import pymbxas
+import ase 
+import ase.io
 from pymbxas.calculators.pyscf import PySCF_mbxas
 
-import ase
-import ase.build
-import ase.data.pubchem
-#%%
+# read structure in ASE format
+structure = ase.io.read("glycine.xyz")
 
-# structure = ase.build.molecule("C6H6")
-# structure = ase.build.molecule("H2O")
-structure = ase.data.pubchem.pubchem_atoms_search(smiles="CCOC(=O)C(F)(F)F")
-
+# set up calculation parameters
+channel   = 1 
 charge    = 0 # charge of system
 spin      = 0 # spin of system
-to_excite = 0 # index of atom to excite
+to_excite = "N" # index(es)/symbols of atom(s) to excite
+basis     = "def2-svpd"
+xc        = "lda"#"b3lyp"
+pbc       = False
 
+# set up object
 obj = PySCF_mbxas(
     structure    = structure,
     charge       = charge,
     spin         = spin,
-    excitation   = to_excite,
-    xc           = "b3lyp",
-    basis        = "def2-svpd",
+    xc           = xc, 
+    basis        = basis,
     do_xch       = True, # do XCH for energy alignment
-    target_dir   = structure.get_chemical_formula(), # specify a target directory where to run calc
-    verbose      = 5,     # level of verbose of pySCF output (4-5 is good)
-    print_fchk   = True,  # print fchk files (requires MOKIT)
+    target_dir   = None, # specify a target directory where to run calc
+    verbose      = 3,     # level of verbose of pySCF output (4-5 is good)
+    print_fchk   = False,  # print fchk files (requires MOKIT)
     print_output = False, # print output to console
-    run_calc     = True,  # run all calculations directly
     save         = True,  # save object as pkl file
-    save_all     = False, # save all checkfile
     save_name    = "pyscf_obj.pkl", # name of saved file
     save_path    = None, # path of saved object
+    loc_type     = "ibo",
+    gpu          = True # if you want to use the GPU code
     )
 
-
-#%%
-
-E, I = obj.get_mbxas_spectra(sigma=0.03)
-
-
-#%%
-
-import matplotlib.pyplot as plt
-
-plt.figure()
-plt.plot(E, I)
-plt.show()
-
-
+# run calculation (GS + FCH + XCH)
+obj.kernel(to_excite)
 ```
 
+The spectra can then be obtained with:
 
-You can easily reload a saved ".pkl" file as follow:
 ```python
-from pymbxas.calculators.qchem import Qchem_mbxas
+import matplotlib.pyplot as plt
 
-# load MBXAS object
-obj = Qchem_mbxas(pkl_file="mbxas_obj.pkl") #change with actual name of file
+E, I = obj.get_mbxas_spectra(to_excite)#, erange=[395, 430], sigma=0.006)
 
-# Obtained broadened MBXAS spectra
-X, Y = obj.get_mbxas_spectra()
-
-# Plot spectra
 plt.figure()
-plt.plot(X, Y)
+plt.plot(E,I)
 plt.show()
+```
+
+Calculations can be stored as pkl files using the dill package. You can then simply reload a calculation doing:
+
+```python
+obj = PySCF_mbxas(pkl_file="pyscf_obj.pkl")
 
 ```
 
 ### Roadmap
-Expand the method to interface and help manage multiple DFT codes, expand spectra visualization and analysis capabilities, ... (pretty much everything is WIP at the moment).
+Implement Machine Learning of spectral features (WIP). In the future, expand the method to interface and help manage multiple DFT codes, expand spectra visualization and analysis capabilities, ... (pretty much everything is WIP at the moment).

@@ -22,7 +22,7 @@ logging.basicConfig(
 import numpy as np
 
 # self module utilities
-# import pymbxas
+import pymbxas
 from pymbxas.calculators.excitation import Excitation
 import pymbxas.utils.check_keywords as check
 from pymbxas.utils.auxiliary import as_list
@@ -52,6 +52,7 @@ class PySCF_mbxas():
                  basis        = "def2-svpd",
                  pbc          = False,
                  solvent      = None,
+                 calc_type    = "UKS",
                  do_xch       = True,
                  pkl_file     = None,
                  target_dir   = None,
@@ -82,17 +83,18 @@ class PySCF_mbxas():
 
         if pkl_file is None:
             self._initialize_from_scratch(structure, charge, spin,
-                                          xc, basis, pbc, solvent, do_xch,
-                                          verbose, print_fchk, print_output,
-                                          save, loc_type, save_name, save_path,
-                                          save_chk, gpu)
+                                          xc, basis, pbc, solvent, calc_type,
+                                          do_xch, verbose, print_fchk,
+                                          print_output, save, loc_type,
+                                          save_name, save_path, save_chk, gpu)
         
         return
 
     def _initialize_from_scratch(self, structure, charge, spin,
-                                  xc, basis, pbc, solvent, do_xch, verbose,
-                                  print_fchk, print_output, save, loc_type,
-                                  save_name, save_path, save_chk, gpu):
+                                  xc, basis, pbc, solvent, calc_type,
+                                  do_xch, verbose, print_fchk, print_output,
+                                  save, loc_type, save_name, save_path,
+                                  save_chk, gpu):
 
         # output, verbose and printing
         self._output_settings = {
@@ -125,6 +127,7 @@ class PySCF_mbxas():
             "pbc"      : check.check_pbc(pbc, structure),
             "loc"      : loc_type,
             "xch"      : do_xch,
+            "calc_type": calc_type,
             # ... add more parameters as needed
             }
         
@@ -139,7 +142,16 @@ class PySCF_mbxas():
     # run all pymbxas from scratch
     def kernel(self, excitation):
         
-        self.logger.info("Starting PyMBXAS")
+        
+        header = """----------------------------------|
+           |                                  |
+           |>>>>>>   Starting PyMBXAS   <<<<<<|
+           |                                  |
+           |       ver {:>7} | {:<12} |
+           |----------------------------------|
+        """.format(pymbxas.__version__, pymbxas.__date__)
+        
+        self.logger.info(header)
         
         # change directory
         os.chdir(self._tdir)
@@ -225,16 +237,18 @@ class PySCF_mbxas():
         xc        = self.parameters["xc"]
         pbc       = self.parameters["pbc"]
         solvent   = self.parameters["solvent"]
+        calc_type = self.parameters["calc_type"]
         
         # generate molecule
         gs_mol = ase_to_mole(self.structure, charge, spin, basis=basis, pbc=pbc,
                              verbose=self.oset["verbose"],
-                             print_output=self.oset["print_output"])
+                             print_output=self.oset["print_output"],
+                             is_gpu=self.oset["is_gpu"])
         
         # generate KS calculator
         gs_calc = make_pyscf_calculator(gs_mol, xc, pbc=pbc, solvent=solvent,
-                                        dens_fit=None, calc_name="gs",
-                                        save=self.oset["save_chk"],
+                                        calc_type=calc_type, dens_fit=None,
+                                        calc_name="gs", save=self.oset["save_chk"],
                                         gpu=self.oset["is_gpu"])
 
         # run SCF #TODO: check how to change convergence parameters
@@ -291,7 +305,7 @@ class PySCF_mbxas():
         
         mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
         
-        self.logger.info("Localization with {}: {}".format(loc_type, s1_orbitals[1]))
+        self.logger.info("{} localization : {}".format(loc_type.upper(), s1_orbitals[1]))
         
         self._used_loc = True
         

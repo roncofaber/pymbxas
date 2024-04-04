@@ -15,6 +15,7 @@ from pyscf.pbc import gto as pgto
 
 from pymbxas.io.logger import Logger
 from pymbxas.utils.check_keywords import check_pbc
+from pymbxas.utils.auxiliary import get_available_memory
 
 try:
     import sea_urchin.alignement.align as ali
@@ -25,7 +26,8 @@ except:
 
 # convert an ase Atoms object to a mole or cell object for pyscf
 def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
-                verbose=4, print_output=True, symmetry=False, **kwargs):
+                verbose=4, print_output=True, symmetry=False,
+                is_gpu=False, **kwargs):
 
     # generate atom list to feed to object
     atom_list = []
@@ -51,6 +53,7 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
             a = structure.get_cell().array,
             ke_cutoff = 100.0,
             symmetry = symmetry,
+            **kwargs
             )
     
     # non periodic system
@@ -63,9 +66,10 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
             spin = spin,
             verbose = verbose,
             stdout = Logger(print_output),
-            max_memory = 0,
+            max_memory = get_available_memory(is_gpu),
             unit = 'Angstrom',
             symmetry = symmetry,
+            **kwargs
             )
 
     mol.build()

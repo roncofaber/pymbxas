@@ -12,9 +12,9 @@ from pyscf import lo
 #%%
 
 def do_localization_pyscf(dft_calc, deg_orbitals, loc_type):
-    if "boys" in loc_type:
+    if "boys" in loc_type.lower():
         mo_loc = do_boys_pyscf(dft_calc, deg_orbitals)
-    elif "ibo" in loc_type:
+    elif "ibo" in loc_type.lower():
         mo_loc = do_ibo_pyscf(dft_calc, deg_orbitals)
         
     return mo_loc

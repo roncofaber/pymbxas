@@ -47,7 +47,7 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
         # generate calculator
         if "HF" in calc_type.upper():
             if xc is not None:
-                print("XC keyword ignored.")
+                print("HF method: XC keyword ignored.")
             calc = getattr(scf, calc_type)(mol)
         elif "KS" in calc_type.upper():
             if xc is None:

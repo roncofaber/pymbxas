@@ -29,12 +29,9 @@ class Excitation(object):
     def __init__(self, structure, gs_data, ato_idx, parameters, channel,
                  df_obj, oset, logger):
         
-        # output stuff
-        self.oset   = oset
-        self.logger = logger
-        
         # set up excitation info
         self.ato_idx   = ato_idx
+        self.symbol    = structure.get_chemical_symbols()[ato_idx]
         self.channel   = channel
         
         # store output
@@ -42,47 +39,54 @@ class Excitation(object):
         self.data   = {}
         
         # find index of orbital to excite
-        self.orb_idx = find_1s_orbitals_pyscf(gs_data.mol,
-                                              gs_data.mo_coeff[channel],
-                                              gs_data.mo_energy[channel],
-                                              gs_data.mo_occ[channel],
-                                              [ato_idx],
-                                              check_deg=False)
+        orb_idx = find_1s_orbitals_pyscf(gs_data.mol, gs_data.mo_coeff[channel],
+                                         gs_data.mo_energy[channel],
+                                         gs_data.mo_occ[channel],
+                                         [ato_idx],
+                                         check_deg=False)
         
-        # make it work even if it uses GPU
-        if self.oset["is_gpu"]:
-            gs_data = gs_data.to_gpu()
-        
-        if len(self.orb_idx) > 1:
-            self.logger.error("It seems that the atomic orbitals are still delocalized.")
+        # check that the orbitals are not still delocalized
+        if not len(orb_idx) == 1:
+            logger.error("It seems that the atomic orbitals are still delocalized.")
+            logger.error("Excitation of {:<2} atom #{:>2} aborted.".format(
+                self.symbol, self.ato_idx))
             return
         
+        # assign index of the orbital to excite
+        self.orb_idx = orb_idx[0]
+        
+        # make it work even if it uses GPU
+        if oset["is_gpu"]:
+            gs_data = gs_data.to_gpu()
+            
         # run excitation
-        self._excite(structure, gs_data, parameters, df_obj)
+        self._excite(structure, gs_data, parameters, df_obj, logger, oset)
         
         return
     
     
     # use it to run excitation of the selected atom
-    def _excite(self,structure, gs_data, parameters, df_obj):
+    def _excite(self, structure, gs_data, parameters, df_obj, logger, oset):
         
-        self.logger.info("------- Exciting atom #{:>2} -------|".format(self.ato_idx))
+        logger.info("-----> Exciting {:<2} atom #{:>2} <-----|".format(
+            self.symbol, self.ato_idx))
         
         # run FCH
-        self._run_fch(structure, gs_data, parameters, df_obj)
+        self._run_fch(structure, gs_data, parameters, df_obj, logger, oset)
         
         # run XCH
-        self._run_xch(structure, gs_data, parameters, df_obj)
+        self._run_xch(structure, gs_data, parameters, df_obj, logger, oset)
         
         # run MBXAS
-        self._run_mbxas(gs_data)
+        self._run_mbxas(gs_data, logger)
         
+        logger.info("----- Excitation successful! -----|\n")
         return
     
     # run the FCH calculation
-    def _run_fch(self, structure, gs_data, parameters, df_obj):
+    def _run_fch(self, structure, gs_data, parameters, df_obj, logger, oset):
         
-        self.logger.info(">>> Started FCH calculation.")
+        logger.info(">>> Started FCH calculation.")
         
         # retrieve parameters
         pbc       = parameters["pbc"]
@@ -91,6 +95,7 @@ class Excitation(object):
         basis     = parameters["basis"]
         xc        = parameters["xc"]
         solvent   = parameters["solvent"]
+        calc_type = parameters["calc_type"]
 
         start_time  = time.time()
 
@@ -100,17 +105,23 @@ class Excitation(object):
 
         # Assign initial occupation pattern --> kick orbital N
         occupation[self.channel][self.orb_idx] = 0
+        
+        # assign magmom
+        magmom = len(structure)*[0]
+        magmom[self.ato_idx] = 1-2*self.channel
 
         # change charge
         fch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=pbc, verbose=self.oset["verbose"],
-                              print_output=self.oset["print_output"])
+                              pbc=pbc, verbose=oset["verbose"],
+                              print_output=oset["print_output"],
+                              magmom=magmom, is_gpu=oset["is_gpu"])
 
         # Defnine new SCF calculator
-        fch_calc = make_pyscf_calculator(fch_mol, xc, pbc=pbc, solvent=solvent,
+        fch_calc = make_pyscf_calculator(fch_mol, xc=xc, calc_type=calc_type,
+                                         pbc=pbc, solvent=solvent,
                                          dens_fit=df_obj, calc_name="fch",
-                                         save=self.oset["save_chk"],
-                                         gpu=self.oset["is_gpu"],)
+                                         save=oset["save_chk"],
+                                         gpu=oset["is_gpu"],)
 
         # Construct new density matrix with new occupation pattern
         dm_u = fch_calc.make_rdm1(scf_guess, occupation)
@@ -131,13 +142,13 @@ class Excitation(object):
         #                            self.ato_idx),
         #                        )
             
-        self.logger.info(">>> FCH finished in {:.1f} s.".format(time.time() - start_time))
+        logger.info(">>> FCH finished in {:.1f} s.".format(time.time() - start_time))
         return
 
     # run the XCH calculation
-    def _run_xch(self, structure, gs_data, parameters, df_obj):
+    def _run_xch(self, structure, gs_data, parameters, df_obj, logger, oset):
         
-        self.logger.info(">>> Started XCH calculation.")
+        logger.info(">>> Started XCH calculation.")
         
         # retrieve parameters
         pbc       = parameters["pbc"]
@@ -146,8 +157,9 @@ class Excitation(object):
         basis     = parameters["basis"]
         xc        = parameters["xc"]
         solvent   = parameters["solvent"]
+        calc_type = parameters["calc_type"]
         
-        if self.oset["is_gpu"]:
+        if oset["is_gpu"]:
             data = self.data["fch"].to_gpu()
         else:
             data = self.data["fch"]
@@ -164,14 +176,16 @@ class Excitation(object):
 
         # make XCH molecule
         xch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=pbc, verbose=self.oset["verbose"],
-                              print_output=self.oset["print_output"],)
+                              pbc=pbc, verbose=oset["verbose"],
+                              print_output=oset["print_output"],
+                              is_gpu=oset["is_gpu"])
 
         # define new SCF calculator
-        xch_calc = make_pyscf_calculator(xch_mol, xc, pbc=pbc, solvent=solvent,
+        xch_calc = make_pyscf_calculator(xch_mol, xc=xc, calc_type=calc_type,
+                                         pbc=pbc, solvent=solvent,
                                          dens_fit=df_obj, calc_name="xch",
-                                         save=self.oset["save_chk"],
-                                         gpu=self.oset["is_gpu"])
+                                         save=oset["save_chk"],
+                                         gpu=oset["is_gpu"])
 
         # Construct new density matrix with new occupation pattern
         dm_u = xch_calc.make_rdm1(scf_guess, occupation)
@@ -196,12 +210,12 @@ class Excitation(object):
         #                            self.ato_idx),
         #                        )
 
-        self.logger.info(">>> XCH finished in {:.1f} s.".format(time.time() - start_time))
+        logger.info(">>> XCH finished in {:.1f} s.".format(time.time() - start_time))
         
         return
     
     # run MBXAS from a set of pySCF calculations
-    def _run_mbxas(self, gs_data):
+    def _run_mbxas(self, gs_data, logger):
         
         start_time = time.time()
 
@@ -217,6 +231,5 @@ class Excitation(object):
             "basis_ovlp" : b_ovlp
             }
         
-        self.logger.info(">>> MBXAS finished in {:.1f} s [\u2713].".format(time.time() - start_time))
-        self.logger.info("---------------------------------|\n")
+        logger.info(">>> MBXAS finished in {:.1f} s [\u2713].".format(time.time() - start_time))
         return
