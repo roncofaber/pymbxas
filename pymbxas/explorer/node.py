@@ -13,25 +13,33 @@ import sea_urchin.clustering.clusterize as clf
 from sklearn.gaussian_process import GaussianProcessRegressor
 import sklearn.gaussian_process.kernels as sker
 
-Ha = 27.2113862161
+import pymbxas.utils.auxiliary as aux
+
+import copy
+
+# from ase import units
+# Ha = units.Ha
+
 #%%
 
 # class of a single electronic cluster
 class spectralNode():
     
-    def __init__(self, spectra_list, label, Xdata, yscaler="standard"):
+    def __init__(self, spectras, label, Xdata, yscaler="standard",
+                 isotropic=False, ykernel=None):
         
         # read data to use for fitting
-        Xs, y_E, y_A = self.__read_data(spectra_list, label, Xdata)
+        Xs, y_E, y_A, n_targets = self._read_data(spectras, label, Xdata, isotropic)
         
-        self.y_A = y_A
+        self.y_A       = y_A
+        self.n_targets = n_targets
         
-        # scale data accordingly
-        ys_E, ys_A = self.__scale_data(y_E, y_A, yscaler)
+        # scale data accordinglspectray
+        ys_E, ys_A = self._scale_data(y_E, y_A, yscaler)
         
         # do fitting for energies and amplitudes
-        self.kr_e = self.__fit_energy(Xs, ys_E)
-        self.kr_a = self.__fit_amplitudes(Xs, ys_A)
+        self.kr_e = self._fit_energy(Xs, ys_E, n_targets, ykernel)
+        self.kr_a = self._fit_amplitudes(Xs, ys_A, n_targets, isotropic, ykernel)
         
         # assign label variable
         self.label = label
@@ -40,128 +48,116 @@ class spectralNode():
     
     # read data from spectra and return them
     @staticmethod
-    def __read_data(spectra_list, label, Xdata):
+    def _read_data(spectras, label, Xdata, isotropic):
+        
+        # obtain number of targets
+        n_targets = int(aux.standardCount([sp._el_labels for sp in spectras], label))
         
         # read spectral data
         y_E  = []
         y_A  = []
         Xout = []
-        for cc, spectra in enumerate(spectra_list):
+        for cc, spectra in enumerate(spectras):
             
             idxs = np.where(spectra._el_labels == label)[0]
             
-            if len(idxs) != 1: #TODO fix for idxs > 1
+            # ignore if wrong number of targets
+            if len(idxs) != n_targets:
                 continue
-            idx = idxs[0]
-            
-            # tensor = spectra.get_amplitude_tensor()[:,:,idx]
-            amp = spectra.amplitude[:,idx]
-            
+    
             # append energies
-            y_E.append(spectra.energies[idx])
+            y_E.append(spectra.energies[idxs])
             
             # append values to fit amplitude
-            I1 = np.dot(amp, amp)
-            I2 = amp[2]/np.sqrt(I1)
-            I3 = np.arctan2(amp[0]/np.sqrt(I1), amp[1]/np.sqrt(I1))
-            
-            y_A.append([I1, I2, I3])
+            amp = spectra.amplitude[:,idxs]
+            y_A.append(amp**2) # append square value of the amplitude
             
             # store training coordinates
             Xout.append(Xdata[cc])
         
         # define values for fitting (convert to eV)
-        y_E  = Ha*np.array(y_E)
+        y_E  = np.array(y_E).reshape(-1, n_targets)
         Xout = np.array(Xout) 
         y_A  = np.array(y_A)
         
-        return Xout, y_E, y_A
+        if isotropic:
+            # y_A = np.mean(y_A, axis=1).reshape(-1, 1, n_targets)
+            y_A = np.mean(y_A, axis=1).reshape(-1, n_targets)
+        
+        return Xout, y_E, y_A, n_targets
     
     # take read data and return scaled data while generating the scalers
-    def __scale_data(self, y_E, y_A, yscaler):
+    def _scale_data(self, y_E, y_A, yscaler):
         
         # generate data scalers
         self.yscale_E = clf.generate_scaler(yscaler)
         self.yscale_A = clf.generate_scaler(yscaler)
       
         # scale 'em
-        ys_E = self.yscale_E.fit_transform(y_E.reshape(-1, 1))
+        ys_E = self.yscale_E.fit_transform(y_E)
         ys_A = self.yscale_A.fit_transform(y_A)
         
         return ys_E, ys_A
     
     @staticmethod
-    def __fit_energy(Xs, ys_E):
+    def _fit_energy(Xs, ys_E, n_targets, ykernel):
         
-        kernel = 5.0 * sker.RBF(
-            length_scale        = 15.0,
-            length_scale_bounds = (1e-3, 1e3)
-            )
+        if ykernel is None:
+            kernel = 5.0 * sker.RBF(
+                length_scale        = 15.0,
+                length_scale_bounds = (1e-3, 1e3)
+                )
+        else:
+            kernel = copy.deepcopy(ykernel)
         
         k_e = GaussianProcessRegressor(
             kernel,
-            n_restarts_optimizer = 25
+            n_restarts_optimizer = 25,
+            n_targets            = n_targets
             ).fit(Xs, ys_E)
         
         return k_e
     
     @staticmethod
-    def __fit_amplitude(Xs, ys_A_axis):
+    def _fit_amplitudes(Xs, ys_A, n_targets, isotropic, ykernel):
         
-        # kernel = 1*sker.RBF(
-        #     length_scale        = 15.0,
-        #     length_scale_bounds = (1e-4, 1e3)
-        #     )
+        assert isotropic, "Only isotropic implemented"
+        
+        
+        if ykernel is None:
+            kernel = sker.RBF() + sker.Matern()
+        else:
+            kernel = copy.deepcopy(ykernel)
+
+        k_a = GaussianProcessRegressor(kernel,
+                                       n_restarts_optimizer = 10,
+                                       n_targets            = n_targets
+                                       ).fit(Xs, ys_A)
             
-        # kernel = \
-        #     sker.ConstantKernel(constant_value_bounds=(1e-7, 1e2)) * \
-        #     sker.Matern(
-        #         length_scale        = 15.0,
-        #         length_scale_bounds = (1e-3, 1e3),
-        #         nu = 1.5
-        #         )
-        
-        # kernel = sker.ExpSineSquared() * sker.RBF() + 1*sker.Matern(nu=2.5)
-        kernel = sker.RBF() + sker.Matern()
-        
-        k_a = GaussianProcessRegressor(
-            kernel,
-            n_restarts_optimizer = 10,
-            # n_targets            = 1
-            )
-        
-        k_a.fit(Xs, ys_A_axis)
-        
         return k_a
     
-    def __fit_amplitudes(self, Xs, ys_A):
-        
-        k_amplitudes = []
-        for ys_A_axis in ys_A.T:
-            k_a = self.__fit_amplitude(Xs, ys_A_axis.reshape(-1, 1))
-            k_amplitudes.append(k_a)
-            
-        return k_amplitudes
-    
-    def __predict_energy(self, Xtest):
-        xas_energy = self.kr_e.predict(Xtest).reshape(-1, 1)
+    def _predict_energy(self, Xtest):
+        xas_energy = self.kr_e.predict(Xtest).reshape(-1, self.n_targets)
         return self.yscale_E.inverse_transform(xas_energy)
     
-    def __predict_amplitude(self, Xtest):
+    def _predict_amplitude(self, Xtest):
         
-        xas_amplitudes = []
-        for kr_a in self.kr_a:
-            xas_amplitude = kr_a.predict(Xtest)
-            xas_amplitudes.append(xas_amplitude)
+        # xas_amplitudes = []
+        # for kr_a in self.kr_a:
+        #     xas_amplitude = kr_a.predict(Xtest)
+        #     xas_amplitudes.append(xas_amplitude)
         
-        xas_amplitudes = np.concatenate(xas_amplitudes).reshape(-1,3)
+        xas_amplitudes = self.kr_a.predict(Xtest)
+        
+        # xas_amplitudes = np.concatenate(xas_amplitudes).reshape(-1,self.n_targets)
+        xas_amplitudes = xas_amplitudes.reshape(-1,self.n_targets)
         
         return self.yscale_A.inverse_transform(xas_amplitudes)
     
     
     def predict(self, Xtest_scaled):
         
-        y_e_pred = self.__predict_energy(Xtest_scaled)
-        y_a_pred = self.__predict_amplitude(Xtest_scaled)
+        y_e_pred = self._predict_energy(Xtest_scaled)
+        y_a_pred = self._predict_amplitude(Xtest_scaled)
         
-        return np.squeeze(np.concatenate(y_e_pred)), np.squeeze(y_a_pred)
+        return np.squeeze(y_e_pred), np.squeeze(y_a_pred)

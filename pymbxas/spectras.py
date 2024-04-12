@@ -50,25 +50,20 @@ class Spectras():
     def __initialize_collection(self, spectra_list, labels, post_align,
                                 alignment):
         
+        # copy input spectras
         self.spectras = copy.deepcopy(spectra_list)
         
-        if labels is None:
-            self.labels = len(spectra_list)*[-1]
-        else:
-            self.labels = labels.copy()
-
+        # assign labels, if existend
+        self.assign_atomic_labels(labels)
         
-        # assign labels
-        for cc, spectra in enumerate(self.spectras):
-            spectra.label = self.labels[cc]
-        
-        self.__aligned = False
+        # align
         if post_align:
             assert alignment is not None, "Provide an alignment"
             self.align_labels_to_mean_structures(alignment)
             
         return
     
+    # restart from pkl file or another spectras object
     def __restart(self, spectra_obj):
         
         #load a pkl or dict
@@ -88,9 +83,53 @@ class Spectras():
             data = dill.load(fin)
         return data
     
-    # return all spectra with given atomic cluster label
+    def assign_atomic_labels(self, labels):
+        
+        # check if labels are provided
+        if labels is None:
+            self.labels = len(self.spectras)*[-1]
+        else:
+            self.labels = labels.copy()
+                
+        # check that dims match
+        assert len(self.labels) == len(self.spectras), "Wrong labels"
+        
+        # assign labels
+        for cc, spectra in enumerate(self.spectras):
+            spectra._label = self.labels[cc]
+
+        # reset aligned keyword        
+        self._aligned = False
+        
+        return
+    
+    def assign_electronic_labels(self, labels, label=None):
+        
+        if label is None:
+            spectras = self.spectras
+        else:
+            spectras = self.__get_atomic_label(label)
+        
+        # check is all good
+        assert len(labels) == len(spectras)
+        
+        imax = labels.shape[1]
+        
+        # assign electronic labels
+        for cc, sp in enumerate(spectras):
+            tlab = -np.ones(len(sp.energies), dtype=int)
+            tlab[:imax] = labels[cc]
+            
+            sp._el_labels = tlab
+        
+        return
+    
+    # return sliced object with specific label
     def get_spectra_with_label(self, label):
-        return [sp for sp in self.spectras if sp.label == label]
+        
+        sp_list = self.__get_atomic_label(label)
+        
+        return Spectras(sp_list, labels=len(sp_list)*[label])
     
     # get all spectras with a specific label
     def get_mbxas_spectras(self, axis=None, sigma=0.02, npoints=1001, tol=0.01,
@@ -98,7 +137,7 @@ class Spectras():
         if label is None:
             spectras = self.spectras
         else:
-            spectras = self.get_spectra_with_label(label)
+            spectras = self.__get_atomic_label(label)
         
         I_list = []
         for spectra in spectras:
@@ -120,26 +159,24 @@ class Spectras():
         
         return E, np.mean(I_list, axis=0)
     
-    def align_labels_to_mean_structures(self, alignment, labels=None):
+    def align_labels_to_mean_structures(self, alignment):
         
-        if labels is None: # get comp labels
-            labels = self.labels
+
+        for lab in set(self.labels):
             
-        for lab in set(labels):
-            
-            if lab == -1:
+            if lab == -1: #ignore noise
                 continue
             
-            self.align_label_to_mean_structure(lab, alignment)
+            self._align_label_to_mean_structure(lab, alignment)
             
-        self.__aligned = True
+        self._aligned = True
         
         return
     
-    def align_label_to_mean_structure(self, label, alignment):
+    def _align_label_to_mean_structure(self, label, alignment):
         
         # get spectras and structures
-        spectras   = self.get_spectra_with_label(label)
+        spectras   = self.__get_atomic_label(label)
         structures = [sp.structure for sp in spectras]
         
         # calculate mean structure
@@ -160,10 +197,10 @@ class Spectras():
     def get_mean_structure(self, label):
         
         # check alignment was done
-        assert self.__aligned, "You might want to align the structures before..."
+        assert self._aligned, "You might want to align the structures before..."
             
         # get spectras and structures
-        spectras   = self.get_spectra_with_label(label)
+        spectras   = self.__get_atomic_label(label)
         structures = [sp.structure for sp in spectras]
 
         positions = [cc.get_positions() for cc in structures]
@@ -208,13 +245,17 @@ class Spectras():
     
     def get_feature_vector(self, label=None):
         
-        assert label in self.labels and label != -1, "Invalid label provided"
+        if label is None:
+            sp_list = self.spectras
+        else:
+            assert label in self.labels and label != -1, "Invalid label provided"
+            sp_list = self.__get_atomic_label(label)
         
         energies   = []
         amplitudes = []
         overlaps   = []
         # CMOs       = []
-        for spectra in self.get_spectra_with_label(label):
+        for spectra in sp_list:
                   
             # calculate overlap
             ovlp = spectra.get_CMO_orth_proj()
@@ -232,6 +273,12 @@ class Spectras():
     
     def __iter__(self):
         return iter(self.spectras)
+    
+    def __len__(self):
+        return len(self.spectras)
+    
+    def __get_atomic_label(self, label):
+        return [sp for sp in self if sp.label == label]
     
     def _prepare_for_save(self):
         

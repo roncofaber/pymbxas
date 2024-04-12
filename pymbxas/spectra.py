@@ -11,8 +11,6 @@ import numpy as np
 from functools import reduce
 import dill
 
-
-
 # pymbxas utils
 from pymbxas.build.structure import rotate_structure, ase_to_mole
 from pymbxas.utils.basis import get_AO_permutation, get_l_val
@@ -36,7 +34,7 @@ class Spectra():
 
     def __init__(self,
                  pyscf_obj,
-                 excitation=0,
+                 excitation=None,
                  ):
         
         # read spectra from pyscf object
@@ -47,8 +45,13 @@ class Spectra():
         
         return
 
-    # function that reads and initialize the spectra object
+    # function that reads and initialize the spectra object #TODO this is mostly to be updated
     def __initialize_spectra(self, pyscf_obj, excitation):
+        
+        if excitation is None:
+            assert len(pyscf_obj.excitations) == 1, "Specify one excitation"
+            excitation = 0
+                
         
         # retreive calculation details
         self.mol       = pyscf_obj.mol
@@ -75,7 +78,9 @@ class Spectra():
         self._mo_coeff = data.mo_coeff[channel]
         self._mo_occ   = data.mo_occ[channel]
         
-        self._el_labels = None
+        # metadata
+        self._el_labels = [-1]*self.CMO.shape[1]
+        self._label     = -1
         
         return
     
@@ -220,6 +225,10 @@ class Spectra():
     def CMO(self): 
         uno_idxs = np.where(self._mo_occ == 0)[0][1:]
         return self._mo_coeff[:, uno_idxs]
+    
+    @property
+    def label(self):
+        return self._label
     
     
     def write_CMO2fchk(self, center=True, oname="spectra_CMO.fchk"):

@@ -7,7 +7,8 @@ Created on Wed Aug  2 17:03:09 2023
 """
 
 import numpy as np
-
+from ase import units
+Ha = units.Ha
 #%%
 
 def gaussian_broadening(x, sigma):
@@ -23,9 +24,7 @@ def broadened_spectrum(x, energies, intensities, sigma):
 
 # function to get MBXAS spectra
 def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01,
-                      erange=None):
-
-    Ha = 27.2113862161
+                      erange=None, isotropic=False):
     
     if erange is not None:
         min_E, max_E = np.array(erange)/Ha
@@ -38,9 +37,13 @@ def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01,
     
     energy = np.linspace(min_E - tol*dE, max_E + tol*dE, npoints)
     rel_idxs = (energies > min_E-dE) & (energies < max_E+dE)
-
-
-    spectras = broadened_spectrum(energy, energies[rel_idxs],
+    
+    if isotropic:
+        spectras = broadened_spectrum(energy, energies[rel_idxs],
+                                         intensities[rel_idxs], sigma)  # Vectorized calculation
+        
+    else:
+        spectras = broadened_spectrum(energy, energies[rel_idxs],
                                      intensities[:,rel_idxs]**2,
                                      sigma)  # Vectorized calculation
     
