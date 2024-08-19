@@ -17,6 +17,9 @@ try:
     is_mokit = True
 except:
     is_mokit = False
+    
+# from mokit.lib.py2fch import py2fch
+# from mokit.lib.py2fch_direct import mol2fch
 
 #%%
 

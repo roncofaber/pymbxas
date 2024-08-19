@@ -17,6 +17,8 @@ import pymbxas.utils.auxiliary as aux
 
 import copy
 
+import gpflow
+
 # from ase import units
 # Ha = units.Ha
 
@@ -102,21 +104,29 @@ class spectralNode():
     @staticmethod
     def _fit_energy(Xs, ys_E, n_targets, ykernel):
         
-        if ykernel is None:
-            kernel = 5.0 * sker.RBF(
-                length_scale        = 15.0,
-                length_scale_bounds = (1e-3, 1e3)
-                )
-        else:
-            kernel = copy.deepcopy(ykernel)
+        # if ykernel is None:
+        #     kernel = 5.0 * sker.RBF(
+        #         length_scale        = 15.0,
+        #         length_scale_bounds = (1e-3, 1e3)
+        #         )
+        # else:
+        #     kernel = copy.deepcopy(ykernel)
         
-        k_e = GaussianProcessRegressor(
-            kernel,
-            n_restarts_optimizer = 25,
-            n_targets            = n_targets
-            ).fit(Xs, ys_E)
+        # k_e = GaussianProcessRegressor(
+        #     kernel,
+        #     n_restarts_optimizer = 25,
+        #     n_targets            = n_targets
+        #     ).fit(Xs, ys_E)
         
-        return k_e
+        model_E = gpflow.models.GPR(
+            (Xs, ys_E),
+            kernel=gpflow.kernels.SquaredExponential(),
+        )
+        
+        opt_E = gpflow.optimizers.Scipy()
+        opt_E.minimize(model_E.training_loss, model_E.trainable_variables)
+        
+        return model_E
     
     @staticmethod
     def _fit_amplitudes(Xs, ys_A, n_targets, isotropic, ykernel):
@@ -124,20 +134,29 @@ class spectralNode():
         assert isotropic, "Only isotropic implemented"
         
         
-        if ykernel is None:
-            kernel = sker.RBF() + sker.Matern()
-        else:
-            kernel = copy.deepcopy(ykernel)
+        # if ykernel is None:
+        #     kernel = sker.RBF() + sker.Matern()
+        # else:
+        #     kernel = copy.deepcopy(ykernel)
 
-        k_a = GaussianProcessRegressor(kernel,
-                                       n_restarts_optimizer = 10,
-                                       n_targets            = n_targets
-                                       ).fit(Xs, ys_A)
-            
-        return k_a
+        # k_a = GaussianProcessRegressor(kernel,
+        #                                n_restarts_optimizer = 10,
+        #                                n_targets            = n_targets
+        #                                ).fit(Xs, ys_A)
+        
+        model_A = gpflow.models.GPR(
+            (Xs, ys_A),
+            kernel=gpflow.kernels.SquaredExponential(),
+        )
+        
+        opt_A = gpflow.optimizers.Scipy()
+        opt_A.minimize(model_A.training_loss, model_A.trainable_variables)
+        
+        return model_A
     
     def _predict_energy(self, Xtest):
-        xas_energy = self.kr_e.predict(Xtest).reshape(-1, self.n_targets)
+        xas_energy, _ = self.kr_e.predict_f(Xtest)
+        xas_energy = np.array(xas_energy).reshape(-1, self.n_targets)
         return self.yscale_E.inverse_transform(xas_energy)
     
     def _predict_amplitude(self, Xtest):
@@ -147,10 +166,10 @@ class spectralNode():
         #     xas_amplitude = kr_a.predict(Xtest)
         #     xas_amplitudes.append(xas_amplitude)
         
-        xas_amplitudes = self.kr_a.predict(Xtest)
+        xas_amplitudes, _ = self.kr_a.predict_f(Xtest)
         
         # xas_amplitudes = np.concatenate(xas_amplitudes).reshape(-1,self.n_targets)
-        xas_amplitudes = xas_amplitudes.reshape(-1,self.n_targets)
+        xas_amplitudes = np.array(xas_amplitudes).reshape(-1, self.n_targets)
         
         return self.yscale_A.inverse_transform(xas_amplitudes)
     

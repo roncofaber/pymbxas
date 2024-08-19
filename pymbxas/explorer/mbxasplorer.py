@@ -87,8 +87,8 @@ class MBXASplorer():
         self._nodes.append(sn)
         self._labels.append(peak_label)
         
-        if self._verbose:
-            print(sn.kr_a.kernel_)
+        # if self._verbose:
+            # print(sn.kr_a.kernel_)
                 
         return
     

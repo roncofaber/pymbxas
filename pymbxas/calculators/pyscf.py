@@ -17,7 +17,6 @@ logging.basicConfig(
     datefmt = "[%X]",
 )
 
-
 # good ol' numpy
 import numpy as np
 
@@ -323,7 +322,7 @@ class PySCF_mbxas():
         if self._used_loc:
         
             write_data_to_fchk(self.mol,
-                               self.data,
+                              self.data,
                                oname    = self._tdir + "/output_gs_del.fchk",
                                mo_coeff = self.data.mo_coeff_del
                                )

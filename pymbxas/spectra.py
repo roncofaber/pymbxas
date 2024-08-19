@@ -57,21 +57,14 @@ class Spectra():
         self.mol       = pyscf_obj.mol
         self.structure = pyscf_obj.structure
         
-        self.calc_settings = {
-            "charge"  : pyscf_obj.charge,
-            "spin"    : pyscf_obj.spin,
-            "xc"      : pyscf_obj.xc,
-            "basis"   : pyscf_obj.basis,
-            "solvent" : pyscf_obj.solvent,
-            "pbc"     : pyscf_obj.pbc,
-            }
+        self.calc_settings = pyscf_obj.parameters
         
         # get excitation data
         data  = pyscf_obj.excitations[excitation].data["fch"]
         mbxas = pyscf_obj.excitations[excitation].mbxas
         channel = pyscf_obj.excitations[excitation].channel
         
-        self.gs_energy = pyscf_obj.data.e_tot
+        self.gs_energy = pyscf_obj.gs_data.e_tot
         self.energies  = mbxas["energies"]
         self.amplitude = mbxas["absorption"]
         
