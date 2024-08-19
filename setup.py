@@ -9,7 +9,9 @@ Created on Fri Aug 16 17:07:19 2024
 import os
 import re
 from setuptools import setup, find_packages
+#%%
 
+# metadata
 def read_metadata(file_path, variable_name):
     with open(file_path, 'r') as file:
         content = file.read()
@@ -23,12 +25,24 @@ init_file_path = os.path.join('pymbxas', '__init__.py')
 version = read_metadata(init_file_path, 'version')
 author = read_metadata(init_file_path, 'author')
 
+# readme
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
+    
 setup(
-    name            = 'pymbxas',
-    version         = version,
-    author          = author,
-    python_requires = '>=3.6',
-    packages        = find_packages(),
+    name             = 'pymbxas',
+    version          = version,
+    
+    author           = author,
+    author_email     = "fabrice.roncoroni@gmail.com",
+    url              = "https://github.com/yourusername/your-repo",
+    
+    description      = "PyMBXAS is a package for setting up, manipulating, running and visualizing MBXAS calculations using Python.",
+    long_description = long_description,
+    long_description_content_type = "text/markdown",
+    
+    python_requires  = '>=3.6',
+    packages         = find_packages(),
     install_requires = [
         'pyscf>=2.6.2',
         'ase>=3.23.0',
