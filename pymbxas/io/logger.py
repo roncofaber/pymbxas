@@ -9,7 +9,57 @@ Created on Wed Aug  2 17:41:10 2023
 import sys
 from io import StringIO
 
+import logging
+# set up logger object
+logging.basicConfig(
+    level   = logging.INFO,
+    format  = "%(asctime)s |%(message)s",  # Modified format
+    datefmt = "[%H:%M:%S]",
+)
+
 #%%
+
+def configure_logger(level):
+    
+    # Define a mapping from user input to logging levels
+    level_mapping = {
+        1: logging.ERROR,
+        2: logging.WARNING,
+        3: logging.INFO,
+        4: logging.DEBUG,
+        5: logging.CRITICAL,
+    }
+    
+    # level
+    level = level_mapping[level]
+    
+    # Get the root logger
+    root_logger = logging.getLogger()
+    
+    # Clear existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Set the logging level
+    root_logger.setLevel(level)
+    
+    # Create a console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(level)
+    
+    # Create a formatter
+    formatter = logging.Formatter("%(asctime)s |%(message)s", datefmt = "[%H:%M:%S]")
+    
+    # Set the formatter for the handler
+    console_handler.setFormatter(formatter)
+    
+    # Add the handler to the root logger
+    root_logger.addHandler(console_handler)
+    
+    return
+
+
+
 
 # Logger to both print to terminal but store the output as string
 class Logger(object):

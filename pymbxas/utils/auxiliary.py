@@ -19,7 +19,7 @@ def get_available_memory(is_gpu=False):
             command = "nvidia-smi --query-gpu=memory.free --format=csv"
             memory_free_info = subprocess.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
             memory_free_values = [int(x.split()[0]) for x in memory_free_info]
-            return memory_free_values  # Return all GPU memory values
+            return memory_free_values[0]  # Return all GPU memory values
         except FileNotFoundError:
             print("nvidia-smi is not installed or not found in PATH.")
             return None

@@ -10,12 +10,6 @@ import os
 import dill
 import time
 import logging
-# set up logger object
-logging.basicConfig(
-    level   = logging.INFO,
-    format  = "%(asctime)s |%(message)s",  # Modified format
-    datefmt = "[%X]",
-)
 
 # good ol' numpy
 import numpy as np
@@ -27,6 +21,7 @@ import pymbxas.utils.check_keywords as check
 from pymbxas.utils.auxiliary import as_list
 from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.data import pyscf_data
+from pymbxas.io.logger import configure_logger
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
@@ -108,6 +103,7 @@ class PySCF_mbxas():
             }
         
         # logger
+        configure_logger(verbose)
         self.logger = logging.getLogger(__name__)  # Logger tied to this class
 
         # check (#TODO in future allow to restart from a GS calculation)
