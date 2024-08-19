@@ -11,6 +11,13 @@ PyMBXAS leverages the [PySCF  electronic structure code](https://github.com/pysc
 ### Requirements
 You need to have both PySCF and ASE installed in your Python environment. If you want to use GPU capabilities make sure to install [gpu4pyscf](https://github.com/pyscf/gpu4pyscf).
 
+### Installation
+You can install the package by running:
+```
+pip install git+https://gitlab.com/roncofaber/pymbxas.git
+```
+or you can clone the repo and add it to your `PYTHONPATH`.
+
 ### Usage
 To run a MBXAS calculation, you just need to set up the PySCF_mbxas object:
 
