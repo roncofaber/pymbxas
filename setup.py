@@ -31,6 +31,7 @@ setup(
     packages        = find_packages(),
     install_requires = [
         'pyscf>=2.6.2',
+        'ase>=3.23.0',
         'dill>=0.3.8',
         'psutil'
     ],
