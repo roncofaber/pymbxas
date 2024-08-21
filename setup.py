@@ -35,7 +35,7 @@ setup(
     
     author           = author,
     author_email     = "fabrice.roncoroni@gmail.com",
-    url              = "https://github.com/yourusername/your-repo",
+    url              = "https://github.com/roncofaber/pymbxas",
     
     description      = "PyMBXAS is a package for setting up, manipulating, running and visualizing MBXAS calculations using Python.",
     long_description = long_description,

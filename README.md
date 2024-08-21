@@ -12,28 +12,32 @@ PyMBXAS leverages the [PySCF  electronic structure code](https://github.com/pysc
 You need to have both PySCF and ASE installed in your Python environment. If you want to use GPU capabilities make sure to install [gpu4pyscf](https://github.com/pyscf/gpu4pyscf).
 
 ### Installation
-You can install the package by running:
+You can install the latest stable release of the package by running:
+```
+pip install pymbxas
+```
+or if you want the most up to date version:
 ```
 pip install git+https://gitlab.com/roncofaber/pymbxas.git
 ```
-or you can clone the repo and add it to your `PYTHONPATH`.
+Alternatively, you can clone the repo and add it to your `PYTHONPATH`.
 
 ### Usage
 To run a MBXAS calculation, you just need to set up the PySCF_mbxas object:
 
 ```python
 import ase 
-import ase.io
+import ase.build
 from pymbxas.calculators.pyscf import PySCF_mbxas
 
 # read structure in ASE format
-structure = ase.io.read("glycine.xyz")
+structure = ase.build.molecule("H2O")
 
 # set up calculation parameters
 channel   = 1 
 charge    = 0 # charge of system
 spin      = 0 # spin of system
-to_excite = "N" # index(es)/symbols of atom(s) to excite
+to_excite = "O" # index(es)/symbols of atom(s) to excite
 basis     = "def2-svpd"
 xc        = "lda"#"b3lyp"
 pbc       = False
