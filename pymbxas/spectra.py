@@ -185,7 +185,7 @@ class Spectra():
         
         return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T,b_ovlp,iaos))))
     
-    def get_mbxas_spectra(self, axis=None, sigma=0.02, npoints=3001, tol=0.01,
+    def get_mbxas_spectra(self, axis=None, sigma=0.005, npoints=3001, tol=0.01,
                           erange=None, el_label=None):
         
         if el_label is not None:
@@ -224,10 +224,14 @@ class Spectra():
         return self._label
     
     
-    def write_CMO2fchk(self, center=True, oname="spectra_CMO.fchk"):
+    def write_CMO2fchk(self, center=True, oname="spectra_CMO.fchk",
+                       mo_coeff=None):
+        
+        if mo_coeff is None:
+            mo_coeff = self.CMO
         
         write_data_to_fchk(self.mol,
-                           mo_coeff  = self.CMO,
+                           mo_coeff  = mo_coeff,
                            mo_energy = self.energies,
                            mo_occ    = np.zeros((2,len(self.energies))),
                            center    = center,

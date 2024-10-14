@@ -12,11 +12,17 @@ import numpy as np
 
 # MOKIT stuff
 try:
+    import mokit
     from mokit.lib.py2fch import py2fch
     from mokit.lib.py2fch_direct import mol2fch
     is_mokit = True
 except:
-    is_mokit = False
+    try:
+        from mokit.lib.py2fch import py2fch
+        from mokit.lib.py2fch_direct import mol2fch
+        is_mokit = True
+    except:
+        is_mokit = False
     
 # from mokit.lib.py2fch import py2fch
 # from mokit.lib.py2fch_direct import mol2fch

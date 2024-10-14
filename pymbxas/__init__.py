@@ -69,10 +69,10 @@ if sys.version_info[0] == 2:
     raise ImportError('Please run with Python3. This is Python2.')
 
 # package info
-__version__ = '0.3.1a'
+__version__ = '0.4.0'
 __date__ = "04 Apr. 2024"
 __author__ = "Fabrice Roncoroni"
 __all__ = ["spectra", "spectras"]
 
-from .spectra  import Spectra
-from .spectras import Spectras
+from pymbxas.spectra  import Spectra
+from pymbxas.spectras import Spectras

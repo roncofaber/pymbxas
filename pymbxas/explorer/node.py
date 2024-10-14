@@ -10,8 +10,8 @@ import numpy as np
 
 import sea_urchin.clustering.clusterize as clf
 
-from sklearn.gaussian_process import GaussianProcessRegressor
-import sklearn.gaussian_process.kernels as sker
+# from sklearn.gaussian_process import GaussianProcessRegressor
+# import sklearn.gaussian_process.kernels as sker
 
 import pymbxas.utils.auxiliary as aux
 
@@ -54,6 +54,10 @@ class spectralNode():
         
         # obtain number of targets
         n_targets = int(aux.standardCount([sp._el_labels for sp in spectras], label))
+        
+        if n_targets == 0:
+            print("WARNING: 0")
+            n_targets = 1
         
         # read spectral data
         y_E  = []
@@ -98,6 +102,9 @@ class spectralNode():
         # scale 'em
         ys_E = self.yscale_E.fit_transform(y_E)
         ys_A = self.yscale_A.fit_transform(y_A)
+        
+        self._std_E = np.sqrt(self.yscale_E.var_)
+        self._std_A = np.sqrt(self.yscale_A.var_)
         
         return ys_E, ys_A
     
@@ -155,9 +162,13 @@ class spectralNode():
         return model_A
     
     def _predict_energy(self, Xtest):
-        xas_energy, _ = self.kr_e.predict_f(Xtest)
-        xas_energy = np.array(xas_energy).reshape(-1, self.n_targets)
-        return self.yscale_E.inverse_transform(xas_energy)
+        
+        e_pre, e_std = self.kr_e.predict_f(Xtest)
+        
+        e_pre = e_pre.numpy().reshape(-1, self.n_targets)
+        e_std = self._std_E*e_std.numpy()
+        
+        return np.squeeze(self.yscale_E.inverse_transform(e_pre)), np.squeeze(e_std)
     
     def _predict_amplitude(self, Xtest):
         
@@ -166,17 +177,18 @@ class spectralNode():
         #     xas_amplitude = kr_a.predict(Xtest)
         #     xas_amplitudes.append(xas_amplitude)
         
-        xas_amplitudes, _ = self.kr_a.predict_f(Xtest)
+        a_pre, a_std = self.kr_a.predict_f(Xtest)
         
         # xas_amplitudes = np.concatenate(xas_amplitudes).reshape(-1,self.n_targets)
-        xas_amplitudes = np.array(xas_amplitudes).reshape(-1, self.n_targets)
+        a_pre = a_pre.numpy().reshape(-1, self.n_targets)
+        a_std = self._std_A*a_std.numpy()
         
-        return self.yscale_A.inverse_transform(xas_amplitudes)
+        return np.squeeze(self.yscale_A.inverse_transform(a_pre)), np.squeeze(a_std)
     
     
     def predict(self, Xtest_scaled):
         
-        y_e_pred = self._predict_energy(Xtest_scaled)
-        y_a_pred = self._predict_amplitude(Xtest_scaled)
+        e_pre, e_std = self._predict_energy(Xtest_scaled)
+        a_pre, a_std = self._predict_amplitude(Xtest_scaled)
         
-        return np.squeeze(y_e_pred), np.squeeze(y_a_pred)
+        return e_pre, e_std, a_pre, a_std

@@ -269,7 +269,16 @@ class Spectras():
     
     # make class iterable
     def __getitem__(self, index):
-        return self.spectras[index]
+        if isinstance(index, (int, np.integer)):  # Include np.integer to handle NumPy integers
+            return self.spectras[index]
+        elif isinstance(index, slice):
+            subset_spectras = self.spectras[index]
+            return Spectras(subset_spectras)
+        elif isinstance(index, (list, np.ndarray)):
+            subset_spectras = [self.spectras[i] for i in index]
+            return Spectras(subset_spectras)
+        else:
+            raise TypeError("Invalid index type")
     
     def __iter__(self):
         return iter(self.spectras)

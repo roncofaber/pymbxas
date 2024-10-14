@@ -23,7 +23,7 @@ def broadened_spectrum(x, energies, intensities, sigma):
 
 
 # function to get MBXAS spectra
-def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01,
+def get_mbxas_spectra(energies, intensities, sigma=0.005, npoints=3001, tol=0.01,
                       erange=None, isotropic=False):
     
     if erange is not None:
@@ -42,7 +42,8 @@ def get_mbxas_spectra(energies, intensities, sigma=0.3, npoints=3001, tol=0.01,
         spectras = broadened_spectrum(energy, energies[rel_idxs],
                                          intensities[rel_idxs], sigma)  # Vectorized calculation
         
-    else:
+    # else:
+    if not isotropic:
         spectras = broadened_spectrum(energy, energies[rel_idxs],
                                      intensities[:,rel_idxs]**2,
                                      sigma)  # Vectorized calculation

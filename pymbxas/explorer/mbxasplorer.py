@@ -92,7 +92,7 @@ class MBXASplorer():
                 
         return
     
-    def predict(self, structures, node=None):
+    def predict(self, structures, node=None, return_std=False):
         
         if not isinstance(structures, list): # it's a single structure
             Xtest = self.metric([structures])
@@ -105,23 +105,33 @@ class MBXASplorer():
         y_G = self._predict_gs_energy(Xtest_scaled)
         
         if node is not None:
-            return *self[node].predict(Xtest_scaled), np.squeeze(y_G)
+            
+            E_pre, E_std, A_pre, A_std = self[node].predict(Xtest_scaled)
         
+        # iterate over every node
         else:
             
-            y_E, y_A = [], []
-            
+            E_pre, E_std, A_pre, A_std = [], [], [], []
             for node in self:
-                e, a = node.predict(Xtest_scaled)
-                y_E.append(e.reshape(-1, node.n_targets))
-                y_A.append(a.reshape(-1, node.n_targets))
+                e_pre, e_std, a_pre, a_std = node.predict(Xtest_scaled)
                 
-            # y_E = np.squeeze(y_E) #TODO check this with isotropic and not
-            # y_A = np.squeeze(y_A)
-        
+                E_pre.append(e_pre.reshape(-1, node.n_targets))
+                E_std.append(e_std.reshape(-1, node.n_targets))
+                A_pre.append(a_pre.reshape(-1, node.n_targets))
+                A_std.append(a_std.reshape(-1, node.n_targets))
+                
+            E_pre = np.hstack(E_pre)
+            E_std = np.hstack(E_std)
+            A_pre = np.hstack(A_pre)
+            A_std = np.hstack(A_std)
+                
         y_G = np.squeeze(y_G)
-                
-        return np.hstack(y_E), np.hstack(y_A), y_G
+        
+        if return_std:
+            return E_pre, E_std, A_pre, A_std, y_G
+        else:
+            return E_pre, A_pre, y_G
+            
     
     # generate a MBXAS spectra predicted from a structure
     def get_mbxas_spectra(self, structure, axis=None, sigma=0.02, npoints=3001,
@@ -135,7 +145,7 @@ class MBXASplorer():
                                              sigma=sigma, npoints=npoints,
                                              tol=tol, erange=erange,
                                              isotropic=self._is_isotropic)
-        
+
         if isinstance(structure, list):
             norm = len(structure)
         else:
