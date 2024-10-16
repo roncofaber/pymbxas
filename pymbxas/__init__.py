@@ -3,8 +3,8 @@
 | PyMBXAS: Python-based MBXAS implementation        |
 *****************************************************
 
-This code is used to run MBXAS in Python, leveraging the PySCF computational
-environment and ASE.
+PyMBXAS is a package for setting up, manipulating, running and visualizing MBXAS calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
+PyMBXAS leverages the PySCF  electronic structure code and the Atomic Simulation Environment (ASE).
 
 The current implementation is being developed on:
     https://gitlab.com/roncofaber/pymbxas
@@ -20,20 +20,22 @@ If you want more information, please look at the following publications:
 Example script:
     
     import ase 
-    import ase.io
-    import matplotlib.pyplot as plt
+    import ase.build
     from pymbxas.calculators.pyscf import PySCF_mbxas
 
-    structure = ase.io.read("glycine.xyz")
+    # read structure in ASE format
+    structure = ase.build.molecule("H2O")
 
+    # set up calculation parameters
     channel   = 1 
     charge    = 0 # charge of system
     spin      = 0 # spin of system
-    to_excite = "N" # index(es)/symbols of atom(s) to excite
+    to_excite = "O" # index(es)/symbols of atom(s) to excite
     basis     = "def2-svpd"
     xc        = "lda"#"b3lyp"
-    pbc  = False
+    pbc       = False
 
+    # set up object
     obj = PySCF_mbxas(
         structure    = structure,
         charge       = charge,
@@ -49,12 +51,14 @@ Example script:
         save_name    = "pyscf_obj.pkl", # name of saved file
         save_path    = None, # path of saved object
         loc_type     = "ibo",
-        gpu = True
+        gpu          = True # if you want to use the GPU code
         )
 
+    # run calculation (GS + FCH + XCH)
     obj.kernel(to_excite)
 
-    E, I = obj.get_mbxas_spectra(to_excite)#, erange=[395, 430], sigma=0.006)
+    # plot result
+    E, I = obj.get_mbxas_spectra(to_excite)#, erange=[520, 540], sigma=0.006)
 
     plt.figure()
     plt.plot(E,I)
@@ -69,8 +73,8 @@ if sys.version_info[0] == 2:
     raise ImportError('Please run with Python3. This is Python2.')
 
 # package info
-__version__ = '0.4.0'
-__date__ = "04 Apr. 2024"
+__version__ = '0.4.1'
+__date__ = "15 Oct. 2024"
 __author__ = "Fabrice Roncoroni"
 __all__ = ["spectra", "spectras"]
 
