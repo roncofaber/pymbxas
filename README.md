@@ -4,6 +4,7 @@
 
 PyMBXAS: Python-based MBXAS implementation
 -----------------------------------------------
+[![PyPI version](https://badge.fury.io/py/pymbxas.svg)](https://badge.fury.io/py/pymbxas)
 
 PyMBXAS is a package for setting up, manipulating, running and visualizing MBXAS calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
 PyMBXAS leverages the [PySCF  electronic structure code](https://github.com/pyscf/pyscf) and the [Atomic Simulation Environment (ASE)](https://wiki.fysik.dtu.dk/ase/).
