@@ -6,6 +6,7 @@ Created on Tue Aug  1 18:13:29 2023
 @author: roncoroni
 """
 
+# os 'n similar
 import os
 import dill
 import time
@@ -29,10 +30,11 @@ from pymbxas.utils.boys import do_localization_pyscf
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.cleanup import remove_tmp_files
 from pymbxas.io.write import write_data_to_fchk
+from pymbxas import Spectra
 
-# pyscf stuff
-from pyscf.scf.addons import mom_occ
-from pyscf import lo
+# ase
+from ase import units
+Ha = units.Ha
 
 #%%
 
@@ -353,7 +355,7 @@ class PySCF_mbxas():
         return
     
 
-    def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.02, npoints=3001, tol=0.01,
+    def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.5, npoints=3001, tol=0.01,
                           erange=None):
         
         ato_idxs = atoms_to_indexes(self.structure, ato_idx)
@@ -366,7 +368,7 @@ class PySCF_mbxas():
             energies.append(exc.mbxas["energies"])
             intensities.append(exc.mbxas["absorption"])
             
-        energies = np.concatenate(energies)
+        energies    = Ha*np.concatenate(energies)
         intensities = np.concatenate(intensities, axis=1)
         
         erange, spectras = get_mbxas_spectra(energies, intensities,
@@ -419,3 +421,6 @@ class PySCF_mbxas():
     @property
     def parameters(self):
         return self._parameters.copy()
+    
+    def to_spectra(self, excitation=None):
+        return Spectra(self, excitation=excitation)

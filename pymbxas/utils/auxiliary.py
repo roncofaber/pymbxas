@@ -91,3 +91,10 @@ def standardCount(label_arr, labels = None):
     standard_count = unique[counts.argmax()]
     
     return np.squeeze(standard_count)
+
+# change key in dict
+def change_key(d, old_key, new_key):
+    if old_key in d:
+        d[new_key] = d.pop(old_key)
+    else:
+        raise KeyError(f"Key '{old_key}' not found in dictionary")

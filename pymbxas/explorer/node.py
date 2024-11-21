@@ -8,19 +8,10 @@ Created on Fri Feb  2 15:33:50 2024
 
 import numpy as np
 
-import sea_urchin.clustering.clusterize as clf
-
-# from sklearn.gaussian_process import GaussianProcessRegressor
-# import sklearn.gaussian_process.kernels as sker
-
+import pymbxas.utils.metrics as met
 import pymbxas.utils.auxiliary as aux
 
-import copy
-
 import gpflow
-
-# from ase import units
-# Ha = units.Ha
 
 #%%
 
@@ -96,8 +87,8 @@ class spectralNode():
     def _scale_data(self, y_E, y_A, yscaler):
         
         # generate data scalers
-        self.yscale_E = clf.generate_scaler(yscaler)
-        self.yscale_A = clf.generate_scaler(yscaler)
+        self.yscale_E = met.generate_scaler(yscaler)
+        self.yscale_A = met.generate_scaler(yscaler)
       
         # scale 'em
         ys_E = self.yscale_E.fit_transform(y_E)

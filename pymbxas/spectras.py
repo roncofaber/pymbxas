@@ -14,8 +14,6 @@ from pymbxas import Spectra
 
 # can we use the sea urchin here?
 try:
-    # import sea_urchin.alignement.align as ali
-    import sea_urchin.clustering.metrics as met
     import sea_urchin.alignement.align as ali
     SeaUrchin_exists = True
 except:
@@ -132,7 +130,7 @@ class Spectras():
         return Spectras(sp_list, labels=len(sp_list)*[label])
     
     # get all spectras with a specific label
-    def get_mbxas_spectras(self, axis=None, sigma=0.02, npoints=1001, tol=0.01,
+    def get_mbxas_spectras(self, axis=None, sigma=0.5, npoints=1001, tol=0.01,
                           erange=None, label=None, el_label=None):
         if label is None:
             spectras = self.spectras
@@ -149,7 +147,7 @@ class Spectras():
         return E, np.array(I_list)
    
     # get the average spectra
-    def get_mbxas_spectra(self, axis=None, sigma=0.02, npoints=1001, tol=0.01,
+    def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=1001, tol=0.01,
                           erange=None, label=None, el_label=None):
         
         E, I_list = self.get_mbxas_spectras(axis=axis, sigma=sigma,

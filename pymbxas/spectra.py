@@ -16,6 +16,7 @@ from pymbxas.build.structure import rotate_structure, ase_to_mole
 from pymbxas.utils.basis import get_AO_permutation, get_l_val
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.write import write_data_to_fchk
+from pymbxas.utils.auxiliary import change_key
 
 # can we use the sea urchin here?
 try:
@@ -27,6 +28,9 @@ except:
 # pyscf stuff
 from pyscf import lo
 from pyscf.lo import iao, orth
+
+from ase import units
+Ha = units.Ha
 
 #%%
 
@@ -49,9 +53,10 @@ class Spectra():
     def __initialize_spectra(self, pyscf_obj, excitation):
         
         if excitation is None:
-            assert len(pyscf_obj.excitations) == 1, "Specify one excitation"
+            assert len(pyscf_obj.excitations) == 1, "Please specify one excitation"
             excitation = 0
-                
+        else:
+            assert isinstance(excitation, int)
         
         # retreive calculation details
         self.mol       = pyscf_obj.mol
@@ -60,13 +65,13 @@ class Spectra():
         self.calc_settings = pyscf_obj.parameters
         
         # get excitation data
-        data  = pyscf_obj.excitations[excitation].data["fch"]
-        mbxas = pyscf_obj.excitations[excitation].mbxas
+        data    = pyscf_obj.excitations[excitation].data["fch"]
+        mbxas   = pyscf_obj.excitations[excitation].mbxas
         channel = pyscf_obj.excitations[excitation].channel
         
-        self.gs_energy = pyscf_obj.gs_data.e_tot
-        self.energies  = mbxas["energies"]
-        self.amplitude = mbxas["absorption"]
+        self._gs_energy = pyscf_obj.gs_data.e_tot
+        self._energies  = mbxas["energies"]
+        self._amplitude = mbxas["absorption"]
         
         self._mo_coeff = data.mo_coeff[channel]
         self._mo_occ   = data.mo_occ[channel]
@@ -77,14 +82,38 @@ class Spectra():
         
         return
     
+    @property
+    def energies(self):
+        return Ha*self._energies
+    
+    @property
+    def amplitude(self):
+        return self._amplitude
+    
+    @property
+    def gs_energy(self):
+        return Ha*self._gs_energy
+    
     def __restart(self, pyscf_obj):
         
         #load a pkl or dict
         if isinstance(pyscf_obj, dict):
-            self.__dict__ = pyscf_obj.copy()
+            data = pyscf_obj.copy()
         elif isinstance(pyscf_obj, str):
-            self.__dict__ = self.__pkl_to_dict(pyscf_obj)
+            data = self.__pkl_to_dict(pyscf_obj)
+        else:
+            raise TypeError("pyscf_obj must be a dictionary or a string path to a pickle file.")
             
+        # make compatible with older version of pymbxas (<= 0.4.1)
+        for old_key in ["energies", "gs_energy", "amplitude"]:
+            if old_key in data:
+                new_key = "_" + old_key
+                change_key(data, old_key, new_key)
+        
+        # assign values
+        self.__dict__ = data
+        
+        # make the mol
         self.make_mol()
             
         return
@@ -185,7 +214,7 @@ class Spectra():
         
         return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T,b_ovlp,iaos))))
     
-    def get_mbxas_spectra(self, axis=None, sigma=0.005, npoints=3001, tol=0.01,
+    def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
                           erange=None, el_label=None):
         
         if el_label is not None:
@@ -232,7 +261,7 @@ class Spectra():
         
         write_data_to_fchk(self.mol,
                            mo_coeff  = mo_coeff,
-                           mo_energy = self.energies,
+                           mo_energy = self.energies/Ha,
                            mo_occ    = np.zeros((2,len(self.energies))),
                            center    = center,
                            oname     = oname)

@@ -10,8 +10,7 @@ Created on Fri Feb  2 15:32:48 2024
 import numpy as np
 
 # sea urchin, maybe not needed in the future #TODO
-import sea_urchin.clustering.metrics as met
-import sea_urchin.clustering.clusterize as clf
+import pymbxas.utils.metrics as met
 
 # pymbxas stuff
 from pymbxas.explorer.node import spectralNode
@@ -20,10 +19,6 @@ from pymbxas.mbxas.broaden import get_mbxas_spectra
 # learning stuff
 from sklearn.gaussian_process import GaussianProcessRegressor
 import sklearn.gaussian_process.kernels as sker
-
-# instead of random floats, let's make some order
-from ase import units
-Ha = units.Ha
 
 #%%
 
@@ -55,7 +50,7 @@ class MBXASplorer():
         self._metric = metric
         
         # generate scaler for feature vector
-        self.xscale = clf.generate_scaler(xscaler)
+        self.xscale = met.generate_scaler(xscaler)
         
         # calculate feature vector for all spectra
         structures = [sp.structure for sp in spectras]
@@ -163,7 +158,7 @@ class MBXASplorer():
         
         y_G = np.array([sp.gs_energy for sp in spectras])
   
-        self.yscale_G = clf.generate_scaler("none")
+        self.yscale_G = met.generate_scaler("none")
         
         ys_G = self.yscale_G.fit_transform(y_G.reshape(-1, 1))
         
@@ -186,7 +181,7 @@ class MBXASplorer():
     
     def _predict_gs_energy(self, Xtest):
         gs_energy = self.kr_g.predict(Xtest).reshape(-1, 1)
-        return Ha*self.yscale_G.inverse_transform(gs_energy)
+        return self.yscale_G.inverse_transform(gs_energy)
     
     # make class iterable
     def __getitem__(self, index):
