@@ -273,7 +273,12 @@ class Spectras():
             subset_spectras = self.spectras[index]
             return Spectras(subset_spectras)
         elif isinstance(index, (list, np.ndarray)):
-            subset_spectras = [self.spectras[i] for i in index]
+            if all(isinstance(i, (bool, np.bool_)) for i in index):  # Check if all elements are booleans
+                if len(index) != len(self.spectras):
+                    raise IndexError("Boolean index list must have the same length as the spectras list")
+                subset_spectras = [s for s, flag in zip(self.spectras, index) if flag]
+            else:
+                subset_spectras = [self.spectras[i] for i in index]
             return Spectras(subset_spectras)
         else:
             raise TypeError("Invalid index type")

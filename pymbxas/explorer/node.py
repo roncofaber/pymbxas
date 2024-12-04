@@ -102,20 +102,6 @@ class spectralNode():
     @staticmethod
     def _fit_energy(Xs, ys_E, n_targets, ykernel):
         
-        # if ykernel is None:
-        #     kernel = 5.0 * sker.RBF(
-        #         length_scale        = 15.0,
-        #         length_scale_bounds = (1e-3, 1e3)
-        #         )
-        # else:
-        #     kernel = copy.deepcopy(ykernel)
-        
-        # k_e = GaussianProcessRegressor(
-        #     kernel,
-        #     n_restarts_optimizer = 25,
-        #     n_targets            = n_targets
-        #     ).fit(Xs, ys_E)
-        
         model_E = gpflow.models.GPR(
             (Xs, ys_E),
             kernel=gpflow.kernels.SquaredExponential(),
@@ -130,17 +116,6 @@ class spectralNode():
     def _fit_amplitudes(Xs, ys_A, n_targets, isotropic, ykernel):
         
         assert isotropic, "Only isotropic implemented"
-        
-        
-        # if ykernel is None:
-        #     kernel = sker.RBF() + sker.Matern()
-        # else:
-        #     kernel = copy.deepcopy(ykernel)
-
-        # k_a = GaussianProcessRegressor(kernel,
-        #                                n_restarts_optimizer = 10,
-        #                                n_targets            = n_targets
-        #                                ).fit(Xs, ys_A)
         
         model_A = gpflow.models.GPR(
             (Xs, ys_A),
@@ -163,14 +138,8 @@ class spectralNode():
     
     def _predict_amplitude(self, Xtest):
         
-        # xas_amplitudes = []
-        # for kr_a in self.kr_a:
-        #     xas_amplitude = kr_a.predict(Xtest)
-        #     xas_amplitudes.append(xas_amplitude)
-        
         a_pre, a_std = self.kr_a.predict_f(Xtest)
         
-        # xas_amplitudes = np.concatenate(xas_amplitudes).reshape(-1,self.n_targets)
         a_pre = a_pre.numpy().reshape(-1, self.n_targets)
         a_std = self._std_A*a_std.numpy()
         
@@ -183,3 +152,4 @@ class spectralNode():
         a_pre, a_std = self._predict_amplitude(Xtest_scaled)
         
         return e_pre, e_std, a_pre, a_std
+
