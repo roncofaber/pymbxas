@@ -58,26 +58,32 @@ class Spectra():
         else:
             assert isinstance(excitation, int)
         
+        # retrieve excitation
+        excitation = pyscf_obj.excitations[excitation]
+        
         # retreive calculation details
         self.mol       = pyscf_obj.mol
         self.structure = pyscf_obj.structure
+        self._exc_idx  = excitation.ato_idx
         
         self.calc_settings = pyscf_obj.parameters
         
         # get excitation data
-        data    = pyscf_obj.excitations[excitation].data["fch"]
-        mbxas   = pyscf_obj.excitations[excitation].mbxas
-        channel = pyscf_obj.excitations[excitation].channel
+        data    = excitation.data["fch"]
+        mbxas   = excitation.mbxas
+        channel = excitation.channel
         
+        # store XAS data
         self._gs_energy = pyscf_obj.gs_data.e_tot
         self._energies  = mbxas["energies"]
         self._amplitude = mbxas["absorption"]
         
+        # store MO data
         self._mo_coeff = data.mo_coeff[channel]
         self._mo_occ   = data.mo_occ[channel]
         
-        # metadata
-        self._el_labels = [-1]*self.CMO.shape[1]
+        # metadata for clustering and such
+        self._el_labels = np.array([-1]*self.CMO.shape[1])
         self._label     = -1
         
         return
@@ -109,6 +115,15 @@ class Spectra():
             if old_key in data:
                 new_key = "_" + old_key
                 change_key(data, old_key, new_key)
+        
+        # add new keys
+        for new_key in ["_exc_idx"]:
+            if new_key not in data:
+                data[new_key] = None
+                
+        # fix _el_labels
+        if data["_el_labels"] is None:
+            data["_el_labels"] = np.array([-1]*len(np.where(data["_mo_occ"] == 0)[0][1:]))
         
         # assign values
         self.__dict__ = data
@@ -161,7 +176,7 @@ class Spectra():
         self.structure = structure
         self._mo_coeff = ali_MOs
         self.mol       = mol
-        self.amplitude = inv*rot@(self.amplitude)
+        self._amplitude = inv*rot@(self.amplitude)
         
         return
     
@@ -218,7 +233,8 @@ class Spectra():
                           erange=None, el_label=None):
         
         if el_label is not None:
-            assert self._el_labels is not None, "first run el. clustering"
+            if el_label not in self._el_labels:
+                return None, None
             
             idxs = self._el_labels == el_label
             
@@ -294,7 +310,27 @@ class Spectra():
             
         return
     
+    @property
+    def exc_idx(self):
+        return self._exc_idx
+    
     # use it to return a copy of the spectra
     def copy(self):
         data = self._prepare_for_save()
         return Spectra(data)
+
+    def __repr__(self):
+        chemfor = self.structure.get_chemical_formula()
+        ato_idx = self.exc_idx
+        
+        if ato_idx is None:
+            return f"Spectra({chemfor}|??)"
+        
+        ato_sym = self.structure.get_chemical_symbols()[ato_idx]
+        return f"Spectra({chemfor}|{ato_sym}#{ato_idx})"
+    
+    def get_orbitals_with_label(self, label):
+        
+        idxs = np.argwhere(self._el_labels == label)[:,0]
+        
+        return self.CMO[:,idxs]

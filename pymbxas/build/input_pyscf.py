@@ -38,7 +38,6 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
         
         # density fit object is string
         if dens_fit is not None:
-            # calc.with_df._cderi = 'saved_cderi.h5'
             calc.with_df = dens_fit
     
     # no PBC

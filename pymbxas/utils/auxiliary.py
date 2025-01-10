@@ -11,6 +11,8 @@ import psutil
 import numpy as np
 import collections.abc
 
+from ase import Atoms
+
 #%%
 # get available memory either for CPU or GPU
 def get_available_memory(is_gpu=False):
@@ -42,11 +44,14 @@ def get_available_memory(is_gpu=False):
 def as_list(inp):
     if inp is None:
         return None
-    elif isinstance(inp, int) or isinstance(inp, np.int64):
+    elif isinstance(inp, (int, np.integer)):
         return [inp]
-    elif isinstance(inp, collections.abc.Iterable) and not isinstance(inp, str): 
-        # Handles lists, tuples, NumPy arrays, etc. (Excludes strings)
-        return list(inp)  
+    elif isinstance(inp, list):
+        return inp
+    elif isinstance(inp, Atoms):
+        return [inp]
+    elif isinstance(inp, collections.abc.Iterable) and not isinstance(inp, str):
+        return list(inp)
     else:
         raise TypeError(f"Cannot convert type {type(inp)} to list")
     

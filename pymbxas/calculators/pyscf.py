@@ -19,7 +19,7 @@ import numpy as np
 import pymbxas
 from pymbxas.calculators.excitation import Excitation
 import pymbxas.utils.check_keywords as check
-from pymbxas.utils.auxiliary import as_list
+from pymbxas.utils.auxiliary import as_list, change_key
 from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.data import pyscf_data
 from pymbxas.io.logger import configure_logger
@@ -30,7 +30,7 @@ from pymbxas.utils.boys import do_localization_pyscf
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.cleanup import remove_tmp_files
 from pymbxas.io.write import write_data_to_fchk
-from pymbxas import Spectra
+from pymbxas import Spectra, Spectras
 
 # ase
 from ase import units
@@ -129,10 +129,9 @@ class PySCF_mbxas():
             }
         
         # initialize empty stuff
-        self.output       = {}
-        self.data         = {}
-        self.excitations  = []
-        self.excited_idxs = []
+        self.output        = {}
+        self.data          = {}
+        self._excitations  = []
               
         return
     
@@ -210,8 +209,7 @@ class PySCF_mbxas():
                                 self.parameters, channel, self.df_obj,
                                 self.oset, self.logger)
         
-        self.excited_idxs.append(ato_idx)
-        self.excitations.append(excitation)
+        self._excitations.append(excitation)
             
         return
         
@@ -409,8 +407,19 @@ class PySCF_mbxas():
         # open previously generated gpw file
         with open(pkl_file, "rb") as fin:
             restart = dill.load(fin)
+        
+        # convert to dict
+        data = restart.__dict__.copy()
+            
+        # make compatible with older version of pymbxas (<= 0.5.0)
+        for old_key in ["excitations"]:
+            if old_key in data:
+                new_key = "_" + old_key
+                change_key(data, old_key, new_key)
+        for del_key in ["excited_idxs"]:
+            data.pop(del_key, None)
 
-        self.__dict__ = restart.__dict__.copy()
+        self.__dict__ = data
 
         return
     
@@ -422,5 +431,24 @@ class PySCF_mbxas():
     def parameters(self):
         return self._parameters.copy()
     
+    @property
+    def excitations(self):
+        return self._excitations
+    
+    @property
+    def excited_idxs(self):
+        return [exc.ato_idx for exc in self.excitations]
+    
     def to_spectra(self, excitation=None):
-        return Spectra(self, excitation=excitation)
+        
+        if excitation is None:
+            indexes = list(range(len(self.excitations)))
+        else:
+            indexes = as_list(excitation)
+            
+        spectras = [Spectra(self, excitation=cc) for cc in indexes]
+        
+        if len(spectras) == 1:
+            return spectras[0]
+        else:
+            return Spectras(spectras)

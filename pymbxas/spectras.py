@@ -42,6 +42,10 @@ class Spectras():
         else:
             self.__restart(spectra_list)
         
+        # store internal variables for later
+        energies = np.concatenate([sp.energies for sp in self])
+        self._erange = [min(energies), max(energies)]
+        
         return
     
     # start from list of pyscf objects
@@ -126,36 +130,49 @@ class Spectras():
     def get_spectra_with_label(self, label):
         
         sp_list = self.__get_atomic_label(label)
-        
+
         return Spectras(sp_list, labels=len(sp_list)*[label])
     
     # get all spectras with a specific label
-    def get_mbxas_spectras(self, axis=None, sigma=0.5, npoints=1001, tol=0.01,
+    def get_mbxas_spectras(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
                           erange=None, label=None, el_label=None):
         if label is None:
             spectras = self.spectras
         else:
             spectras = self.__get_atomic_label(label)
+            
+        if erange is None:
+            erange = self._erange
         
         I_list = []
         for spectra in spectras:
-            E, I = spectra.get_mbxas_spectra(axis=axis, sigma=sigma,
+            Et, I = spectra.get_mbxas_spectra(axis=axis, sigma=sigma,
                                              npoints=npoints, tol=tol,
                                              erange=erange, el_label=el_label)
-            I_list.append(I)
+            if I is not None:
+                E = Et
+                I_list.append(I)
         
         return E, np.array(I_list)
    
     # get the average spectra
-    def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=1001, tol=0.01,
-                          erange=None, label=None, el_label=None):
+    def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
+                          erange=None, label=None, el_label=None, average=True):
+        
+        if erange is None:
+            erange=self._erange
         
         E, I_list = self.get_mbxas_spectras(axis=axis, sigma=sigma,
                                             npoints=npoints, tol=tol,
                                             erange=erange, label=label,
                                             el_label=el_label)
         
-        return E, np.mean(I_list, axis=0)
+        if average:
+            I_list = np.mean(I_list, axis=0)
+        else:
+            I_list = np.sum(I_list, axis=0)
+        
+        return E, I_list
     
     def align_labels_to_mean_structures(self, alignment):
         

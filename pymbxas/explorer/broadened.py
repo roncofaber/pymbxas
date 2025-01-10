@@ -9,10 +9,9 @@ Created on Mon Dec  2 14:48:34 2024
 import numpy as np
 
 import pymbxas.utils.metrics as met
-import pymbxas.utils.auxiliary as aux
 
 import gpflow
-import tensorflow as tf
+from gpflow.ci_utils import reduce_in_tests
 #%%
 
 # class to learn broadened XAS spectra
@@ -37,6 +36,7 @@ class BroadXAS():
         # read data to use for fitting
         y_E, y_A = self._read_data(spectras, isotropic, broaden)
         
+        self._Xs  = Xs
         self._y_A = y_A
         self._y_E = y_E
         
@@ -86,30 +86,60 @@ class BroadXAS():
         
         return ys_A
     
-    @staticmethod
-    def _fit_amplitudes(Xs, ys_A, isotropic, ykernel):
+    def _fit_amplitudes(self, Xs, ys_A, isotropic, ykernel):
         
         assert isotropic, "Only isotropic implemented"
         
+        # M       = 15
+        MAXITER = reduce_in_tests(2000)
+        # # Zinit = np.squeeze([np.linspace(-5, 5, M)[:, None] for _ in range(3)]).T
+        
+        # Zinit = np.random.normal(scale=2, size=(M, len(Xs[0])))
+        
+        # lgts = np.ones(Xs.shape[1])
+        # my_kernel = gpflow.kernels.Matern32(lengthscales=lgts)
+        
+        # # create multi-output kernel
+        # kernel = gpflow.kernels.SharedIndependent(
+        #     my_kernel,
+        #     output_dim=self._npoints
+        # )
+        
+        # # initialization of inducing input locations (M random points from the training inputs)
+        # Z = Zinit.copy()
+        # # create multi-output inducing variables from Z
+        # iv = gpflow.inducing_variables.SharedIndependentInducingVariables(
+        #     gpflow.inducing_variables.InducingPoints(Z)
+        # )
+        
+        # model_A = gpflow.models.SVGP(kernel, gpflow.likelihoods.Gaussian(),
+        #                           inducing_variable=iv, num_latent_gps=self._npoints)
+        
+
+        # opt_A = gpflow.optimizers.Scipy()
+        # opt_A.minimize(
+        #     model_A.training_loss_closure((Xs, ys_A)),
+        #     variables=model_A.trainable_variables,
+        #     method="l-bfgs-b",
+        #     options={"disp": 100, "maxiter": MAXITER},
+        # )
+        # opt_A.minimize(model_A.training_loss_closure((Xs, ys_A)), model_A.trainable_variables)
+    
+        ## SIMPLE CASE
+        lgts = np.ones(Xs.shape[1])
+        vras = 1.6
+        my_kernel = gpflow.kernels.Matern32(variance=vras, lengthscales=lgts)
+        
         model_A = gpflow.models.GPR(
             (Xs, ys_A),
-            kernel=gpflow.kernels.SquaredExponential(),
-        )
-        
-        # opt_A = tf.keras.optimizers.Adam()
-
-        # @tf.function
-        # def step() -> tf.Tensor:
-        #     opt_A.minimize(model_A.training_loss, model_A.trainable_variables)
-        
-        # maxiter = 2000
-        # for i in range(maxiter):
-        #     step()
-        #     if i % 100 == 0:
-        #         print(i, model_A.training_loss().numpy())
+            kernel         = my_kernel,
+            # num_latent_gps = self._npoints,
+            # noise_variance = 1e-6,
+            )
         
         opt_A = gpflow.optimizers.Scipy()
         opt_A.minimize(model_A.training_loss, model_A.trainable_variables)
+        
         
         return model_A
     
