@@ -2,11 +2,11 @@
   <img src="https://gitlab.com/uploads/-/system/project/avatar/47099716/pymbxas2_1_.png" height="120px"/>
 </div>
 
-PyMBXAS: Python-based MBXAS implementation
+PyMBXAS: Python-based many-body XAS implementation
 -----------------------------------------------
 [![PyPI version](https://badge.fury.io/py/pymbxas.svg)](https://badge.fury.io/py/pymbxas)
 
-PyMBXAS is a package for setting up, manipulating, running and visualizing MBXAS calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
+PyMBXAS is a package for setting up, manipulating, running and visualizing Many-Body X-ray Adsorption Spectroscopy (MBXAS) calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
 PyMBXAS leverages the [PySCF  electronic structure code](https://github.com/pyscf/pyscf) and the [Atomic Simulation Environment (ASE)](https://wiki.fysik.dtu.dk/ase/).
 
 ### Requirements
@@ -110,4 +110,4 @@ obj = PySCF_mbxas(pkl_file="pyscf_obj.pkl")
 ```
 
 ### Roadmap
-Implement Machine Learning of spectral features (WIP). In the future, expand the method to interface and help manage multiple DFT codes, expand spectra visualization and analysis capabilities, ... (pretty much everything is WIP at the moment).
+Implement Machine Learning of spectral features. The `mbxasplorer` class implements Gaussian Process Regression to predict XAS spectra of molecules, but is still WIP. In the future, expand the method to interface and help manage multiple DFT codes, expand spectra visualization and analysis capabilities, ...

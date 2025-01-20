@@ -235,10 +235,7 @@ class PySCF_mbxas():
         calc_type = self.parameters["calc_type"]
         
         # generate molecule
-        gs_mol = ase_to_mole(self.structure, charge, spin, basis=basis, pbc=pbc,
-                             verbose=self.oset["verbose"],
-                             print_output=self.oset["print_output"],
-                             is_gpu=self.oset["is_gpu"])
+        gs_mol = self.make_mol(charge, spin, basis, pbc)
         
         # generate KS calculator
         gs_calc = make_pyscf_calculator(gs_mol, xc, pbc=pbc, solvent=solvent,
@@ -439,6 +436,7 @@ class PySCF_mbxas():
     def excited_idxs(self):
         return [exc.ato_idx for exc in self.excitations]
     
+    # convert object to Spectra object
     def to_spectra(self, excitation=None):
         
         if excitation is None:
@@ -452,3 +450,13 @@ class PySCF_mbxas():
             return spectras[0]
         else:
             return Spectras(spectras)
+        
+    # internal function to generate a pyscf mol obj
+    def make_mol(self, charge, spin, basis, pbc):
+        
+        mol = ase_to_mole(self.structure, charge, spin, basis=basis, pbc=pbc,
+                             verbose=self.oset["verbose"],
+                             print_output=self.oset["print_output"],
+                             is_gpu=self.oset["is_gpu"])
+        
+        return mol

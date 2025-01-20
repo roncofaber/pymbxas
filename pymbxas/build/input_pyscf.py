@@ -34,7 +34,7 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
     
     # with PBC
     if pbc:
-        calc = getattr(pypbc.scf, calc_type)(mol, xc=xc).density_fit()
+        calc = getattr(pypbc.dft, calc_type)(mol, xc=xc).density_fit()
         
         # density fit object is string
         if dens_fit is not None:

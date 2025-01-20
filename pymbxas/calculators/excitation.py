@@ -90,8 +90,8 @@ class Excitation(object):
         
         # retrieve parameters
         pbc       = parameters["pbc"]
-        charge    = parameters["charge"] + 1 if not pbc else 0 #TODO: check if works properly for PBC
-        spin      = parameters["spin"] + self.channel*2 - 1 if not pbc else 0 #TODO: check if works properly for PBC
+        charge    = parameters["charge"] + 1 #if not pbc else 0 #TODO: check if works properly for PBC
+        spin      = parameters["spin"] + self.channel*2 - 1 #if not pbc else 0 #TODO: check if works properly for PBC
         basis     = parameters["basis"]
         xc        = parameters["xc"]
         solvent   = parameters["solvent"]
