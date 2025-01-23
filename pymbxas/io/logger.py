@@ -64,7 +64,7 @@ def configure_logger(level):
 # Logger to both print to terminal but store the output as string
 class Logger(object):
     def __init__(self, print_to_terminal=True):
-        self.print_to_terminal = print_to_terminal
+        # self.print_to_terminal = print_to_terminal
         if print_to_terminal:
             self.terminal_write = sys.stdout.write
         else:

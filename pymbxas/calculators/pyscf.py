@@ -53,8 +53,8 @@ class PySCF_mbxas():
                  pkl_file     = None,
                  target_dir   = None,
                  verbose      = 4,
-                 print_fchk   = True,
-                 print_output = False,
+                 print_fchk   = False,
+                 print_output = True,
                  save         = True,  # save object as pkl file
                  save_chk     = False, # save calculation as chkfile
                  save_name    = "pyscf_obj.pkl", # name of saved file
@@ -302,8 +302,8 @@ class PySCF_mbxas():
         self._used_loc = True
         
         # update MO coeff if localization was used
+        self.gs_data.mo_coeff_del = self.gs_data.mo_coeff.copy()
         if self._used_loc:
-            self.gs_data.mo_coeff_del = self.gs_data.mo_coeff.copy()
             self.gs_data.mo_coeff     = mo_loc
         
         return
