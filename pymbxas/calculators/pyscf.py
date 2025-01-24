@@ -22,7 +22,7 @@ import pymbxas.utils.check_keywords as check
 from pymbxas.utils.auxiliary import as_list, change_key
 from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.data import pyscf_data
-from pymbxas.io.logger import configure_logger
+from pymbxas.io.config import configure_logger
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
@@ -46,20 +46,27 @@ class PySCF_mbxas():
                  spin         = 0,
                  xc           = "b3lyp",
                  basis        = "def2-svpd",
-                 pbc          = False,
-                 solvent      = None,
-                 calc_type    = "UKS",
-                 do_xch       = True,
-                 pkl_file     = None,
-                 target_dir   = None,
-                 verbose      = 4,
-                 print_fchk   = False,
-                 print_output = True,
+                 pbc          = False, # enable PBC or not
+                 solvent      = None,  # specify solvent epsilon
+                 calc_type    = "UKS", # UKS or UHF
+                 do_xch       = True,  # do XCH to align energy
+                 loc_type     = "ibo", # localization routine
+                 
+                 pkl_file     = None, # reload previous calculation from pkl
+                 target_dir   = None, # run the calculation in a target dir
+                 
+                 xas_verbose  = 3,    # verbose level of pymbxas
+                 xas_logfile  = None, # file for mbxas log
+                 dft_verbose  = 3,    # verbose level of pyscf
+                 dft_logfile  = None, # file for pyscf log
+                 dft_output   = True, # print pyscf output or not
+                 
+                 print_fchk   = False, # print FCHK files as calculation goes
+                 
                  save         = True,  # save object as pkl file
                  save_chk     = False, # save calculation as chkfile
                  save_name    = "pyscf_obj.pkl", # name of saved file
                  save_path    = None, # path of saved object
-                 loc_type     = "ibo",
                  gpu          = False,
                  ):
         
@@ -80,23 +87,28 @@ class PySCF_mbxas():
         if pkl_file is None:
             self._initialize_from_scratch(structure, charge, spin,
                                           xc, basis, pbc, solvent, calc_type,
-                                          do_xch, verbose, print_fchk,
-                                          print_output, save, loc_type,
+                                          do_xch, xas_verbose, xas_logfile,
+                                          dft_verbose, dft_logfile, dft_output,
+                                          print_fchk, save, loc_type,
                                           save_name, save_path, save_chk, gpu)
         
         return
 
     def _initialize_from_scratch(self, structure, charge, spin,
                                   xc, basis, pbc, solvent, calc_type,
-                                  do_xch, verbose, print_fchk, print_output,
-                                  save, loc_type, save_name, save_path,
-                                  save_chk, gpu):
+                                  do_xch, xas_verbose, xas_logfile,
+                                  dft_verbose, dft_logfile, dft_output,
+                                  print_fchk, save, loc_type,
+                                  save_name, save_path, save_chk, gpu):
 
         # output, verbose and printing
         self._output_settings = {
             "print_fchk"   : print_fchk,
-            "print_output" : print_output,
-            "verbose"      : verbose,
+            "xas_verbose"  : xas_verbose,
+            "xas_logfile"  : xas_logfile,
+            "dft_verbose"  : dft_verbose,
+            "dft_logfile"  : dft_logfile,
+            "dft_output"   : dft_output,
             "save"         : save,
             "save_chk"     : save_chk,
             "save_path"    : save_path,
@@ -105,7 +117,7 @@ class PySCF_mbxas():
             }
         
         # logger
-        configure_logger(verbose)
+        configure_logger(xas_verbose, log_file=xas_logfile)
         self.logger = logging.getLogger(__name__)  # Logger tied to this class
 
         # check (#TODO in future allow to restart from a GS calculation)
@@ -137,9 +149,19 @@ class PySCF_mbxas():
     
     # run all pymbxas from scratch
     def kernel(self, excitation):
+        """
+        Run all pymbxas calculations from scratch.
+        
+        Parameters:
+        excitation (list or int): Atom indices to excite.
+        
+        Returns:
+        None
+        """
         
         
-        header = """----------------------------------|
+        header = """
+           |----------------------------------|
            |                                  |
            |>>>>>>   Starting PyMBXAS   <<<<<<|
            |                                  |
@@ -165,7 +187,6 @@ class PySCF_mbxas():
         # save object if needed
         if self.oset["save"]:
             self.save_object()
-            
             self.logger.info("Saved everything as {}".format(self.oset["save_name"]))
             
         # go back where we were
@@ -185,7 +206,6 @@ class PySCF_mbxas():
             self.logger.error("Please run a GS calculation first.")
             return
             
-        
         # convert into atom indexes
         to_excite = atoms_to_indexes(self.structure, ato_idxs)
         
@@ -267,12 +287,23 @@ class PySCF_mbxas():
 
         # mark that GS has been run
         self._ran_GS = True
+        self.mol.stdout.close()
         
         self.logger.info(u"GS finished in {:.1f} s.\n".format(time.time() - start_time))
         return
     
     # run localization procedure
     def _run_localization(self, dft_calc, loc_type):
+        """
+        Run localization procedure if needed.
+        
+        Parameters:
+        dft_calc: DFT calculation object.
+        loc_type (str): Localization type.
+        
+        Returns:
+        None
+        """
         
         # define list of relevant atoms
         ato_idxs = [cc for cc, ato in enumerate(self.structure) if ato.symbol != "H"]
@@ -304,7 +335,7 @@ class PySCF_mbxas():
         # update MO coeff if localization was used
         self.gs_data.mo_coeff_del = self.gs_data.mo_coeff.copy()
         if self._used_loc:
-            self.gs_data.mo_coeff     = mo_loc
+            self.gs_data.mo_coeff = mo_loc
         
         return
     
@@ -379,6 +410,16 @@ class PySCF_mbxas():
 
     # save object as pkl file
     def save_object(self, oname=None, save_path=None):
+        """
+        Run localization procedure if needed.
+        
+        Parameters:
+        dft_calc: DFT calculation object.
+        loc_type (str): Localization type.
+        
+        Returns:
+        None
+        """
         
         if oname is None:
             oname = self.oset["save_name"]
@@ -455,8 +496,9 @@ class PySCF_mbxas():
     def make_mol(self, charge, spin, basis, pbc):
         
         mol = ase_to_mole(self.structure, charge, spin, basis=basis, pbc=pbc,
-                             verbose=self.oset["verbose"],
-                             print_output=self.oset["print_output"],
+                             verbose=self.oset["dft_verbose"],
+                             print_output=self.oset["dft_output"],
+                             log_file=self.oset["dft_logfile"],
                              is_gpu=self.oset["is_gpu"])
         
         return mol

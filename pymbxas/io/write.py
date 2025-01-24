@@ -7,34 +7,25 @@ Created on Thu Jun 22 12:01:06 2023
 """
 
 import os
-# import pymbxas.build.input as inp
 import numpy as np
-
-# MOKIT stuff
-try:
-    import mokit
-    from mokit.lib.py2fch import py2fch
-    from mokit.lib.py2fch_direct import mol2fch
-    is_mokit = True
-except:
-    try:
-        from mokit.lib.py2fch import py2fch
-        from mokit.lib.py2fch_direct import mol2fch
-        is_mokit = True
-    except:
-        is_mokit = False
-    
-# from mokit.lib.py2fch import py2fch
-# from mokit.lib.py2fch_direct import mol2fch
 
 #%%
 
 def write_data_to_fchk(mol, mo_coeff=None, mo_occ=None, density=False,
-                       mo_energy=None, oname="tmp.fchk",  center=False):
+                       mo_energy=None, oname="tmp.fchk",  center=False,
+                       logger=None):
     
-    # if not is_mokit:
-    #     print("No MOKIT")
-    #     return
+    try: # MOKIT stuff
+        import mokit
+        from mokit.lib.py2fch import py2fch
+        from mokit.lib.py2fch_direct import mol2fch
+    except:
+        if logger is None:
+            print("No MOKIT found - fchk file not written!")
+        else:
+            logger.warn("No MOKIT found - fchk file not written!")
+        return
+        
     
     directory = os.path.dirname(oname)
     if directory and not os.path.exists(directory):

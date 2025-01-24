@@ -6,8 +6,6 @@ Created on Thu Aug  3 15:29:31 2023
 @author: roncoroni
 """
 
-import numpy as np
-
 import ase
 
 from pyscf import gto
@@ -17,17 +15,12 @@ from pymbxas.io.logger import Logger
 from pymbxas.utils.check_keywords import check_pbc
 from pymbxas.utils.auxiliary import get_available_memory
 
-try:
-    import sea_urchin.alignement.align as ali
-    has_SU = True
-except:
-    has_SU = False
 #%%
 
 # convert an ase Atoms object to a mole or cell object for pyscf
 def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
-                verbose=4, print_output=True, symmetry=False,
-                is_gpu=False, **kwargs):
+                verbose=4, print_output=True, log_file=None, symmetry=False,
+                is_gpu=False, append=False, **kwargs):
 
     # generate atom list to feed to object
     atom_list = []
@@ -40,16 +33,19 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
     if pbc is None:
         pbc = check_pbc(pbc, structure)
     
+    # Create Logger instance
+    logger = Logger(print_to_terminal=print_output, log_file=log_file,
+                    append=append)
+    
     # periodic system
     if pbc:
-        
         mol = pgto.Cell(
             atom  = atom_list,
             basis = basis,
             charge = charge,
             spin = spin,
             verbose = verbose,
-            stdout = Logger(print_output),
+            stdout = logger,
             a = structure.get_cell().array,
             ke_cutoff = 100.0,
             symmetry = symmetry,
@@ -58,14 +54,13 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
     
     # non periodic system
     else:
-
         mol = gto.Mole(
             atom  = atom_list,
             basis = basis,
             charge = charge,
             spin = spin,
             verbose = verbose,
-            stdout = Logger(print_output),
+            stdout = logger,
             max_memory = get_available_memory(is_gpu),
             unit = 'Angstrom',
             symmetry = symmetry,
@@ -74,7 +69,7 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
 
     mol.build()
     
-    # overwrite intergrals if PBC with proper ones #TODO: check if needed and correct
+    # overwrite integrals if PBC with proper ones #TODO: check if needed and correct
     if pbc:
         mol.intor = mol.pbc_intor
     
@@ -93,6 +88,11 @@ def mole_to_ase(mol, units="Angstrom", **kwargs):
 
 # rotate, translate, permute, inverse a structure
 def rotate_structure(structure, rot, tr, perm, inv, rtype):
+    try:
+        import sea_urchin.alignement.align as ali
+        has_SU = True
+    except:
+        has_SU = False
     assert has_SU, "Please install Sea Urchin to use this"
     return ali.align_structure(structure, rot, tr, perm, inv, rtype)
     
