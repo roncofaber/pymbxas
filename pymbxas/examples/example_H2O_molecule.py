@@ -23,24 +23,37 @@ basis     = "def2-svpd"
 xc        = "lda"#"b3lyp"
 pbc       = False
 
-# set up object
+# set up object (showing all extra arguments, many are optional)
 obj = PySCF_mbxas(
     structure    = structure,
     charge       = charge,
     spin         = spin,
-    xc           = xc, 
+    xc           = xc,
     basis        = basis,
-    do_xch       = True, # do XCH for energy alignment
-    target_dir   = None, # specify a target directory where to run calc
-    verbose      = 3,     # level of verbose of pySCF output (4-5 is good)
-    print_fchk   = False,  # print fchk files (requires MOKIT)
-    print_output = False, # print output to console
+    pbc          = pbc, # enable PBC or not
+    solvent      = None,  # specify solvent epsilon
+    calc_type    = "UKS", # UKS or UHF
+    do_xch       = True,  # do XCH to align energy
+    loc_type     = "ibo", # localization routine
+    
+    pkl_file     = None, # reload previous calculation from pkl
+    target_dir   = None, # run the calculation in a target dir
+    
+    xas_verbose  = 3,    # verbose level of pymbxas
+    xas_logfile  = "pymbxas.log", # file for mbxas log
+    dft_verbose  = 6,    # verbose level of pyscf
+    dft_logfile  = "pyscf.log", # file for pyscf log
+    dft_output   = False, # print pyscf output or not on terminal
+    
+    print_fchk   = False, # print FCHK files as calculation goes
+    
     save         = True,  # save object as pkl file
+    save_chk     = False, # save calculation as chkfile
     save_name    = "pyscf_obj.pkl", # name of saved file
     save_path    = None, # path of saved object
-    loc_type     = "ibo",
-    gpu          = True # if you want to use the GPU code
+    gpu          = False,
     )
+
 
 # run calculation (GS + FCH + XCH)
 obj.kernel(to_excite)

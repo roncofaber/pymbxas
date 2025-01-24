@@ -19,9 +19,6 @@ from pymbxas.mbxas.mbxas import run_MBXAS_pyscf
 # pyscf stuff
 from pyscf.scf.addons import mom_occ
 
-# MOKIT stuff
-from pymbxas.io.write import write_data_to_fchk
-    
 #%%
     
 class Excitation(object):
@@ -30,9 +27,9 @@ class Excitation(object):
                  df_obj, oset, logger):
         
         # set up excitation info
-        self.ato_idx   = ato_idx
-        self.symbol    = structure.get_chemical_symbols()[ato_idx]
-        self.channel   = channel
+        self.ato_idx = ato_idx
+        self.symbol  = structure.get_chemical_symbols()[ato_idx]
+        self.channel = channel
         
         # store output
         self.output = {}
@@ -86,6 +83,7 @@ class Excitation(object):
     # run the FCH calculation
     def _run_fch(self, structure, gs_data, parameters, df_obj, logger, oset):
         
+        start_time = time.time()
         logger.info(">>> Started FCH calculation.")
         
         # retrieve parameters
@@ -96,8 +94,6 @@ class Excitation(object):
         xc        = parameters["xc"]
         solvent   = parameters["solvent"]
         calc_type = parameters["calc_type"]
-
-        start_time  = time.time()
 
         # Read MO coefficients and occupation number from GS
         scf_guess  = copy.deepcopy(gs_data.mo_coeff)
@@ -112,9 +108,10 @@ class Excitation(object):
 
         # change charge
         fch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=pbc, verbose=oset["verbose"],
-                              print_output=oset["print_output"],
-                              magmom=magmom, is_gpu=oset["is_gpu"])
+                              pbc=pbc, verbose=oset["dft_verbose"],
+                              print_output=oset["dft_output"],
+                              log_file=oset["dft_logfile"],
+                              magmom=magmom, is_gpu=oset["is_gpu"], append=True)
 
         # Defnine new SCF calculator
         fch_calc = make_pyscf_calculator(fch_mol, xc=xc, calc_type=calc_type,
@@ -135,19 +132,17 @@ class Excitation(object):
         # store input/output
         self.output["fch"] = fch_calc.stdout.log.getvalue()
         self.data["fch"]   = pyscf_data(fch_calc)
-
-        # if pobj._print_fchk:
-        #     write_data_to_fchk(pobj.mol, fch_calc,
-        #                        oname = pobj._tdir + "/output_fch_{}.fchk".format(
-        #                            self.ato_idx),
-        #                        )
+        
+        # close logfile of mol if exists
+        fch_mol.stdout.close()
             
-        logger.info(">>> FCH finished in {:.1f} s.".format(time.time() - start_time))
+        logger.info(">>>>> FCH finished in {:.1f} s.".format(time.time() - start_time))
         return
 
     # run the XCH calculation
     def _run_xch(self, structure, gs_data, parameters, df_obj, logger, oset):
         
+        start_time = time.time()
         logger.info(">>> Started XCH calculation.")
         
         # retrieve parameters
@@ -163,8 +158,6 @@ class Excitation(object):
             data = self.data["fch"].to_gpu()
         else:
             data = self.data["fch"]
-        
-        start_time = time.time()
 
         # Read MO coefficients and occupation number from GS
         scf_guess  = copy.deepcopy(data.mo_coeff)
@@ -176,9 +169,10 @@ class Excitation(object):
 
         # make XCH molecule
         xch_mol = ase_to_mole(structure, charge=charge, spin=spin, basis=basis,
-                              pbc=pbc, verbose=oset["verbose"],
-                              print_output=oset["print_output"],
-                              is_gpu=oset["is_gpu"])
+                              pbc=pbc, verbose=oset["dft_verbose"],
+                              print_output=oset["dft_output"],
+                              log_file=oset["dft_logfile"],
+                              is_gpu=oset["is_gpu"], append=True)
 
         # define new SCF calculator
         xch_calc = make_pyscf_calculator(xch_mol, xc=xc, calc_type=calc_type,
@@ -203,14 +197,11 @@ class Excitation(object):
         # store input/output
         self.output["xch"] = xch_calc.stdout.log.getvalue()
         self.data["xch"]   = pyscf_data(xch_calc)
+        
+        # close logfile of mol if exists
+        xch_mol.stdout.close()
 
-        # if pobj._print_fchk:
-        #     write_data_to_fchk(pobj.mol, xch_calc,
-        #                        oname = pobj._tdir + "/output_xch_{}.fchk".format(
-        #                            self.ato_idx),
-        #                        )
-
-        logger.info(">>> XCH finished in {:.1f} s.".format(time.time() - start_time))
+        logger.info(">>>>> XCH finished in {:.1f} s.".format(time.time() - start_time))
         
         return
     
@@ -218,6 +209,7 @@ class Excitation(object):
     def _run_mbxas(self, gs_data, logger):
         
         start_time = time.time()
+        logger.info(">>> Started MBXAS calculation.")
 
         energies, absorption, mb_ovlp, dip_KS, b_ovlp = run_MBXAS_pyscf(
             gs_data.mol, gs_data.to_cpu(), self.data["fch"].to_cpu(),
@@ -231,5 +223,5 @@ class Excitation(object):
             "basis_ovlp" : b_ovlp
             }
         
-        logger.info(">>> MBXAS finished in {:.1f} s [\u2713].".format(time.time() - start_time))
+        logger.info(">>>>> MBXAS finished in {:.1f} s [\u2713].".format(time.time() - start_time))
         return

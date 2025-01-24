@@ -43,51 +43,67 @@ basis     = "def2-svpd"
 xc        = "lda"#"b3lyp"
 pbc       = False
 
-# set up object
+# set up object (showing all extra arguments, many are optional)
 obj = PySCF_mbxas(
     structure    = structure,
     charge       = charge,
     spin         = spin,
-    xc           = xc, 
+    xc           = xc,
     basis        = basis,
-    do_xch       = True, # do XCH for energy alignment
-    target_dir   = None, # specify a target directory where to run calc
-    verbose      = 3,     # level of verbose of pySCF output (4-5 is good)
-    print_fchk   = False,  # print fchk files (requires MOKIT)
-    print_output = False, # print output to console
+    pbc          = pbc, # enable PBC or not
+    solvent      = None,  # specify solvent epsilon
+    calc_type    = "UKS", # UKS or UHF
+    do_xch       = True,  # do XCH to align energy
+    loc_type     = "ibo", # localization routine
+    
+    pkl_file     = None, # reload previous calculation from pkl
+    target_dir   = None, # run the calculation in a target dir
+    
+    xas_verbose  = 3,    # verbose level of pymbxas
+    xas_logfile  = "pymbxas.log", # file for mbxas log
+    dft_verbose  = 6,    # verbose level of pyscf
+    dft_logfile  = "pyscf.log", # file for pyscf log
+    dft_output   = False, # print pyscf output or not on terminal
+    
+    print_fchk   = False, # print FCHK files as calculation goes
+    
     save         = True,  # save object as pkl file
+    save_chk     = False, # save calculation as chkfile
     save_name    = "pyscf_obj.pkl", # name of saved file
     save_path    = None, # path of saved object
-    loc_type     = "ibo",
-    gpu          = True # if you want to use the GPU code
+    gpu          = False,
     )
+
+# run calculation (GS + FCH + XCH)
+obj.kernel(to_excite)
 
 # run calculation (GS + FCH + XCH)
 obj.kernel(to_excite)
 ```
 Output:
 ```
-[10:52:59] |----------------------------------|
+[16:01:53] |(I) 
+           |----------------------------------|
            |                                  |
            |>>>>>>   Starting PyMBXAS   <<<<<<|
            |                                  |
-           |       ver  0.2.0a | 04 Apr. 2024 |
+           |       ver   0.5.0 | 11 Nov. 2024 |
            |----------------------------------|
         
-[10:52:59] |Started a new GS calculation
-[10:53:03] |IBO localization : [3, 4, 2, 0, 1]
-[10:53:03] |GS finished in 4.1 s.
+[16:01:53] |(I) Started a new GS calculation
+[16:01:56] |(I) GS finished in 2.9 s.
 
-[10:53:03] |-----> Exciting N  atom # 3 <-----|
-[10:53:03] |>>> Started FCH calculation.
-[10:53:08] |>>> FCH finished in 4.7 s.
-[10:53:08] |>>> Started XCH calculation.
-[10:53:12] |>>> XCH finished in 4.5 s.
-[10:53:12] |>>> MBXAS finished in 0.0 s [✓].
-[10:53:12] |----- Excitation successful! -----|
+[16:01:56] |(I) -----> Exciting O  atom # 0 <-----|
+[16:01:56] |(I) >>> Started FCH calculation.
+[16:01:59] |(I) >>>>> FCH finished in 3.0 s.
+[16:01:59] |(I) >>> Started XCH calculation.
+[16:02:02] |(I) >>>>> XCH finished in 2.4 s.
+[16:02:02] |(I) >>> Started MBXAS calculation.
+[16:02:02] |(I) >>>>> MBXAS finished in 0.0 s [✓].
+[16:02:02] |(I) ----- Excitation successful! -----|
 
-[10:53:12] |Saved everything as pyscf_obj.pkl
-[10:53:12] |PyMBXAS finished successfully!
+[16:02:02] |(I) Saved everything as pyscf_obj.pkl
+[16:02:02] |(I) PyMBXAS finished successfully!
 ```
 
 The spectra can then be obtained with:
