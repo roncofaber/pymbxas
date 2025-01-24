@@ -73,8 +73,8 @@ if sys.version_info[0] == 2:
     raise ImportError('Please run with Python3. This is Python2.')
 
 # package info
-__version__ = '0.5.0'
-__date__ = "11 Nov. 2024"
+__version__ = '0.5.1'
+__date__ = "23 Jan. 2025"
 __author__ = "Fabrice Roncoroni"
 __all__ = ["spectra", "spectras"]
 
