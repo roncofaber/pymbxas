@@ -13,8 +13,8 @@ import pymbxas.utils.auxiliary as aux
 
 import gpflow
 
-#%% base class
-
+#%%
+# Base class to perform spectra fitting.
 class SpectralNode(object):
     
     def __init__(self, peak_label):
@@ -68,7 +68,8 @@ class SpectralNode(object):
     def n_targets(self):
         return self._npoints
     
-#%% class of a single electronic cluster - discrete
+#%%
+# class of a single electronic cluster - discrete
 
 class DiscreteNode(SpectralNode):
     
@@ -174,7 +175,8 @@ class DiscreteNode(SpectralNode):
         
         return np.squeeze(self.yscale_E.inverse_transform(e_pre)), np.squeeze(e_std)
 
-#%% class of a single electronic cluster - broadened
+#%%
+# class of a single electronic cluster - broadened
 
 class BroadenedNode(SpectralNode):
     

@@ -20,6 +20,26 @@ from collections import defaultdict
 
 #%%
 
+def remove_zero_columns(arr, tol=1e-8):
+    """
+    Removes all columns from a NumPy array where all the data in the column is close to zero.
+
+    Parameters:
+    arr (np.ndarray): The input NumPy array.
+    tol (float): The tolerance for considering a value as zero.
+
+    Returns:
+    np.ndarray: The array with zero columns removed.
+    """
+    # Ensure the input is a NumPy array
+    arr = np.asarray(arr)
+    
+    # Find columns where all elements are close to zero within the given tolerance
+    non_zero_columns = ~np.all(np.isclose(arr, 0, atol=tol), axis=0)
+    
+    # Select only the columns that are not all close to zero
+    return arr[:, non_zero_columns]
+
 class PFA(object):
     def __init__(self, diff_n_features = 2, q=None, explained_var = 0.95,
                  rseed=42):
@@ -96,12 +116,18 @@ class PFA(object):
         return X[:, self.indices_]
     
     @classmethod
-    def filter_data(cls, datas, n_features=1, explained_var=0.975, rseed=42):
+    def filter_data(cls, datas, n_features=1, explained_var=0.975, rseed=42,
+                    do_abs=True, remove_zeros=True, ztol=1e-8):
         out_data = []
         
         for data in datas:
+            
+            if remove_zeros:
+                data = remove_zero_columns(data, tol=ztol)
+                
             # Concatenate data along the feature axis
-            data = abs(np.concatenate(data, axis=1).T)
+            if do_abs:
+                data = abs(np.concatenate(data, axis=1).T)
             
             # make pfa obj
             pfa = cls(diff_n_features=n_features, explained_var=explained_var,

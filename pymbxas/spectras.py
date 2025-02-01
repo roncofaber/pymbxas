@@ -105,7 +105,12 @@ class Spectras():
         
         return
     
-    def assign_electronic_labels(self, labels, label=None):
+    def assign_electronic_labels(self, labels=None, label=None, reset=False):
+        
+        if reset:
+            for sp in self:
+                sp._el_labels = np.array([-1]*sp.CMO.shape[1])
+            return
         
         if label is None:
             spectras = self.spectras
