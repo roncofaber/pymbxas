@@ -8,35 +8,63 @@ Created on Fri Feb  2 15:32:48 2024
 
 # numpy is my rock and I am ready to roll
 import numpy as np
+import copy
 
 # pymbxas stuff
 import pymbxas.utils.metrics as met
-import pymbxas.utils.auxiliary as aux
+from pymbxas.utils.auxiliary import as_list
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.explorer.node import DiscreteNode, BroadenedNode
-
-# learning stuff
-from sklearn.gaussian_process import GaussianProcessRegressor
-import sklearn.gaussian_process.kernels as sker
 
 #%%
 
 # wrapper class to predict a spectra
 class MBXASplorer(object):
     
-    def __init__(self, spectras, fit_labels=None, xscaler="standard",
+    def __init__(self, spectras=None, fit_labels=None, xscaler="standard",
                  yscaler="standard", metric=None, isotropic=True, verbose=0,
-                 ykernel=None, broaden=None):
+                 ykernel=None, broaden=None, train=False):
         
         # set up internal variables
         self._verbose      = verbose
         self._is_isotropic = isotropic
         self._ykernel      = ykernel
         self._broaden      = broaden
+        self._trained      = False
+        self._scaler_type  = {
+            "xdata": xscaler,
+            "ydata": yscaler
+            }
         
         # initialize nodes
         self._nodes  = []
         self._labels = []
+            
+        # define metric (must work on ASE atoms object)
+        if metric is None:
+            metric = met.get_distances
+        self._metric = copy.deepcopy(metric)
+        
+        # generate scaler for feature vector
+        self.xscaler = met.generate_scaler(xscaler)
+        
+        if train:
+            self.train(spectras, fit_labels=fit_labels, ykernel=ykernel,
+                       broaden=broaden, yscaler=yscaler)
+        
+        return
+    
+    # train MBXASplorer from scratch
+    def train(self, spectras, fit_labels=None, ykernel=None, broaden=None,
+              yscaler=None):
+        
+        # get class values
+        if broaden is None:
+            broaden = self._broaden
+        if ykernel is None:
+            ykernel = self._ykernel
+        if yscaler is None:
+            yscaler = self._scaler_type["ydata"]
         
         # define labels to fit
         if fit_labels is None:
@@ -44,32 +72,90 @@ class MBXASplorer(object):
         else:
             fit_labels = [ii for ii in np.unique(fit_labels)
                           if ii in np.unique([sp._el_labels for sp in spectras])]
-            
-        # define metric (must work on ASE atoms object)
-        if metric is None:
-            metric = met.get_distances
-        self._metric = metric
-        
-        # generate scaler for feature vector
-        self.xscale = met.generate_scaler(xscaler)
-        
+                
         # calculate feature vector for all spectra
-        structures = [sp.structure for sp in spectras]
-        X  = self.metric(structures)
-        Xs = self.xscale.fit_transform(X)
-        self._Xs = Xs
+        X  = self.metric([sp.structure for sp in spectras])
+        Xs = self.xscaler.fit_transform(X)
 
         # fit each peak
         for peak_label in fit_labels:
-            self._make_node(spectras, peak_label, Xs, yscaler, isotropic, ykernel,
-                            broaden)
+            self._make_node(spectras, peak_label, Xs, yscaler, self._is_isotropic,
+                            ykernel, broaden)
+            
+        # assign some last variables
+        self._X  = X
+        self._Xs = Xs
+        self._trained = True
+        
+        return
+    
+    def retrain(self, spectras):
+        
+        if not self._trained: raise ValueError("Train the model first")
+        
+        # calculate feature vector for all spectra and refit xscaler
+        X  = self.metric([sp.structure for sp in spectras])
+        Xs = self.xscaler.fit_transform(X)
+        
+        for node in self.nodes:
+            node.train(spectras, Xs, retrain=True)
+        
+        self._X  = X
+        self._Xs = Xs
+        
+        return
+    
+    
+    def explore(self, structure_pool, pymbxasfun, niter, nmin=20, batch_size=1,
+                initial_spectra=None):
+        
+        if initial_spectra is None:
+            # empty list
+            self._spectras = []
+            
+            # indexing
+            iidxs = np.random.choice(list(range(len(structure_pool))), nmin)
+            # do initial training
+            initial_structures = [structure_pool[ii] for ii in iidxs]
+            for structure in initial_structures:
+                spectra = pymbxasfun(structure)
+                self._spectras.append(spectra)
+        else:
+            if not isinstance(initial_spectra, list):
+                raise TypeError("List needed for initial spectra")
+            self._spectras = initial_spectra
+            
+        self.train(self._spectras)
+            
+        # now iterate and train better
+        for ii in range(niter):
+            
+            # get new structures and new spectra
+            new_structures = self._find_where_to_look(structure_pool, nsamples=batch_size)
+            new_spectras   = [pymbxasfun(structure) for structure in new_structures]
+            self._spectras.extend(new_spectras)
+            
+            self.retrain(self._spectras)
             
         return
+    
+    def _find_where_to_look(self, structure_pool, beta=5.0, nsamples=1):
+        
+        _, _, mean, var = self.predict(structure_pool)
+        
+        #Upper Confidence Bound (UCB)
+        ucb = mean + beta * np.sqrt(var)
+        
+        tidxs = np.argsort(ucb.max(axis=1))[-nsamples:]
+        
+        return [structure_pool[ii] for ii in tidxs]
+    
     
     def _make_node(self, spectras, peak_label, Xs, yscaler, isotropic, ykernel,
                    broaden):
         
         if peak_label in self._labels: # ignore noise
+            print(f"Node {peak_label} already exists.")
             return
         
         if broaden is None:
@@ -88,23 +174,21 @@ class MBXASplorer(object):
     
     def predict(self, structures, node=None, return_std=True):
         
-        structures = aux.as_list(structures)
-        Xtest      = self.metric(structures)
+        if not self._trained: raise ValueError("Train the model first")
         
-        # scale new input
-        Xtest_scaled = self.xscale.transform(Xtest)
+        Xtest_s = self.scaled_metric(structures)
         
         if node is None:
             nodelist = self._labels
         else:
-            nodelist = aux.as_list(node)
+            nodelist = as_list(node)
         
         E_pre, E_std, A_pre, A_std = [], [], [], []
         for label in nodelist:
             
             node = self._get_node(label)
             
-            e_pre, e_std, a_pre, a_std = node.predict(Xtest_scaled)
+            e_pre, e_std, a_pre, a_std = node.predict(Xtest_s)
             
             E_pre.append(e_pre.reshape(-1, node.n_targets))
             E_std.append(e_std.reshape(-1, node.n_targets))
@@ -127,7 +211,7 @@ class MBXASplorer(object):
                           tol=0.01, erange=None, node=None):
         
         # make strucute a list
-        structures = aux.as_list(structures)
+        structures = as_list(structures)
         
         # predict E and A
         E_pre, E_std, A_pre, A_std = self.predict(structures, node=node)
@@ -163,11 +247,22 @@ class MBXASplorer(object):
     @property
     def nodes(self):
         return self._nodes
-
+    
+    # return metric of input
     def metric(self, X):
         return self._metric(X)
+    
+    # return scaled metric of input
+    def scaled_metric(self, X):
+        Xtest   = self.metric(X)
+        Xtest_s = self.xscaler.transform(Xtest)
+        return np.asarray(Xtest_s)
 
     def _get_node(self, label):
+        assert label in self._labels, "This node does not exists."
+        
         idx = np.where(np.array(self._labels) == label)[0]
-        assert len(idx) == 1, "TOO MANY"
+        
+        if not len(idx) == 1: raise ValueError
+        
         return self[idx[0]]

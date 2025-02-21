@@ -18,13 +18,6 @@ from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.write import write_data_to_fchk
 from pymbxas.utils.auxiliary import change_key
 
-# can we use the sea urchin here?
-try:
-    import sea_urchin.alignement.align as ali
-    has_SU = True
-except:
-    has_SU = False
-
 # pyscf stuff
 from pyscf import lo
 from pyscf.lo import iao, orth
@@ -35,19 +28,17 @@ Ha = units.Ha
 #%%
 
 class Spectra():
+    """Represents a single spectrum, including molecular
+    structure and electronic data."""
 
-    def __init__(self,
-                 pyscf_obj,
-                 excitation=None,
-                 ):
-        
-        # read spectra from pyscf object
-        if "calculators.pyscf" in str(type(pyscf_obj)):
+    def __init__(self, pyscf_obj, excitation=None):
+        if isinstance(pyscf_obj, (str, dict)):
+            self.__restart(pyscf_obj)
+        elif hasattr(pyscf_obj, "excitations"): #check if it has the excitations attribute
             self.__initialize_spectra(pyscf_obj, excitation)
         else:
-            self.__restart(pyscf_obj)
-        
-        return
+            raise TypeError("Invalid pyscf_obj type.  Must be a path to a pickle file,\
+                            a dictionary, or a pyscf object with excitations.")
 
     # function that reads and initialize the spectra object #TODO this is mostly to be updated
     def __initialize_spectra(self, pyscf_obj, excitation):
@@ -101,42 +92,58 @@ class Spectra():
         return Ha*self._gs_energy
     
     def __restart(self, pyscf_obj):
+        """Restarts the Spectra object from a dictionary or pickle file."""
         
-        #load a pkl or dict
-        if isinstance(pyscf_obj, dict):
-            data = pyscf_obj.copy()
-        elif isinstance(pyscf_obj, str):
-            data = self.__pkl_to_dict(pyscf_obj)
-        else:
-            raise TypeError("pyscf_obj must be a dictionary or a string path to a pickle file.")
+        try:
+            if isinstance(pyscf_obj, dict):
+                data = pyscf_obj.copy()
+            elif isinstance(pyscf_obj, str):
+                with open(pyscf_obj, 'rb') as fin:
+                    data = dill.load(fin)
+            else:
+                raise TypeError("pyscf_obj must be a dictionary or a string path to a pickle file.")
+
+            # Backward compatibility for older pymbxas versions
+            for old_key, new_key in [("energies", "_energies"), ("gs_energy", "_gs_energy"), ("amplitude", "_amplitude")]:
+                if old_key in data:
+                    change_key(data, old_key, new_key)
+
+            # Handle missing keys gracefully
+            for key in ["_exc_idx", "_el_labels"]:
+                if key not in data:
+                    data[key] = None
+
+            if data["_el_labels"] is None:
+                data["_el_labels"] = np.array([-1] * len(np.where(data["_mo_occ"] == 0)[0][1:]))
+
+            # assign data and make mol object
+            self.__dict__ = data
+            self.make_mol()
             
-        # make compatible with older version of pymbxas (<= 0.4.1)
-        for old_key in ["energies", "gs_energy", "amplitude"]:
-            if old_key in data:
-                new_key = "_" + old_key
-                change_key(data, old_key, new_key)
-        
-        # add new keys
-        for new_key in ["_exc_idx"]:
-            if new_key not in data:
-                data[new_key] = None
-                
-        # fix _el_labels
-        if data["_el_labels"] is None:
-            data["_el_labels"] = np.array([-1]*len(np.where(data["_mo_occ"] == 0)[0][1:]))
-        
-        # assign values
-        self.__dict__ = data
-        
-        # make the mol
-        self.make_mol()
-            
-        return
+        except (FileNotFoundError, EOFError, dill.UnpicklingError) as e:
+            print(f"Error loading spectra object: {e}")
+            raise
     
     def __pkl_to_dict(self, filename):
         with open(filename, 'rb') as fin:
             data = dill.load(fin)
         return data
+    
+    def align_to(self, structure, alignment):
+        
+        # can we use the sea urchin here?
+        try:
+            import sea_urchin.alignement.align as ali
+        except:
+            raise ImportError("You need SeaUrchin compiled for this to work.")
+        
+        # get alignments to mean structure
+        rot, tr, perm, inv, dh = ali.get_RTPI(self.structure, structure, alignment)
+        
+        # transform self
+        self.transform(rot, tr, perm, inv, atype=alignment["type"])
+        
+        return
     
     def transform(self, rot=None, tr=None, perm=None,
                        inv=None, atype=None):
@@ -178,11 +185,19 @@ class Spectra():
         self.mol       = mol
         self._amplitude = inv*rot@(self.amplitude)
         
+        # change excited index to follow permutation
+        if perm is not None:
+            self._exc_idx = np.argwhere(perm==self.exc_idx)[0][0]
+        
         return
     
     def align_to_reference(self, reference, alignment, subset=None):
         
-        assert has_SU, "Please, install also Sea Urchin to do this"
+        # can we use the sea urchin here?
+        try:
+            import sea_urchin.alignement.align as ali
+        except:
+            raise ImportError("You need SeaUrchin compiled for this to work.")
         
         if subset is None:
             structure = self.structure
@@ -290,8 +305,7 @@ class Spectra():
         return
     
     def _prepare_for_save(self):
-        """Subclasses can override this to customize saving behavior.
-
+        """
         Returns:
             dict: A dictionary containing data to be serialized.
         """

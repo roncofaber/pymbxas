@@ -13,52 +13,59 @@ from io import StringIO
 
 class Logger(object):
     """
-    Custom logger to print to terminal and store the output as a string.
-    
-    Args:
-        print_to_terminal (bool): If True, prints to terminal.
-        log_file (str): Optional path to a log file.
+    Custom logger to print to terminal and store the output as a string. Tracks file closure.
     """
     def __init__(self, print_to_terminal=True, log_file=None, append=False):
         self.print_to_terminal = print_to_terminal
         self.log = StringIO()
         self.log_file = log_file
-        
+        self.file = None
+        self._isclosed = False
+
         if print_to_terminal:
             self.terminal_write = sys.stdout.write
         else:
-            self.terminal_write = lambda message: None  # A dummy function that does nothing
-        
+            self.terminal_write = lambda message: None
+
         if log_file:
-            if append:
-                self.file = open(log_file, 'a')
-            else:
-                self.file = open(log_file, 'w')
-        else:
-            self.file = None
-    
+            try:
+                if append:
+                    self.file = open(log_file, 'a')
+                else:
+                    self.file = open(log_file, 'w')
+            except (FileNotFoundError, OSError) as e:
+                print(f"Error opening log file: {e}")
+                self._isclosed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def write(self, message):
         self.terminal_write(message)
         self.log.write(message)
-        if self.file:
-            self.file.write(message)
-    
+        if self.file and not self._isclosed:
+            try:
+                self.file.write(message)
+            except (ValueError, OSError) as e:
+                print(f"Error writing to log file: {e}. Setting closed flag.")
+                self._isclosed = True
+
     def flush(self):
-        """
-        This flush method is needed for Python 3 compatibility.
-        This handles the flush command by doing nothing.
-        """
         pass
-    
+
     def close(self):
-        """
-        Close the file handler if it was opened.
-        """
-        if self.file:
-            self.file.close()
+        if self.file and not self._isclosed:
+            try:
+                self.file.close()
+                self._isclosed = True
+            except Exception as e:
+                print(f"Error closing log file: {e}")
 
     def get_log(self):
-        """
-        Retrieve the log messages stored in the StringIO object.
-        """
         return self.log.getvalue()
+
+    def is_closed(self):
+        return self._isclosed

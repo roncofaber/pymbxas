@@ -12,13 +12,44 @@ from pymbxas.utils.auxiliary import as_list
 
 #%%
 
+class EmptyScaler:
+    def fit(self, X, y=None):
+        # No fitting necessary, just return self
+        
+        Xmax = np.max(X)
+        
+        self._Xmax = Xmax
+        
+        return self
+
+    def transform(self, X):
+        # Return the data as is
+        return X/self._Xmax
+
+    def fit_transform(self, X, y=None):
+        # Fit and transform the data (no change)
+        return self.fit(X, y).transform(X)
+
+    def inverse_transform(self, X):
+        # Return the data as is
+        return self._Xmax*X
+    
+    @property
+    def var_(self):
+        return self._Xmax
+    
+    @property
+    def mean_(self):
+        assert False, "YOU SHOULD NOT BE HERE EMPTYSCALRE"
+        return None
+    
 # generate a scaler
 def generate_scaler(scaler):
     
     # match scaler:
         
     if scaler in ["none", None, "None"]:
-        return prep.StandardScaler(with_mean=False, with_std=False)
+        return EmptyScaler()
     
     elif scaler == "robust":
         return prep.RobustScaler(quantile_range = (10, 90))
@@ -47,10 +78,9 @@ def get_distances(clusters):
     return np.array([cc.get_all_distances()[indexes] for cc in clusters])
 
 def get_relevant_distances(clusters, idxs):
-    clusters = as_list(clusters)
     
     distances = []
-    for cluster in clusters:
+    for cluster in as_list(clusters):
         dm = cluster.get_all_distances()
         distances.append(dm[idxs[:,0], idxs[:,1]])
     

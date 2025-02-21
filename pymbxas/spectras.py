@@ -12,13 +12,6 @@ import dill
 
 from pymbxas import Spectra
 
-# can we use the sea urchin here?
-try:
-    import sea_urchin.alignement.align as ali
-    SeaUrchin_exists = True
-except:
-    SeaUrchin_exists = False
-    
 #%%
 
 """
@@ -36,6 +29,9 @@ class Spectras():
                  alignment  = None
                  ):
         
+        if isinstance(spectra_list, Spectra):
+            spectra_list = [spectra_list]
+        
         if isinstance(spectra_list, list):
             self.__initialize_collection(spectra_list, labels, post_align,
                                      alignment)
@@ -43,8 +39,7 @@ class Spectras():
             self.__restart(spectra_list)
         
         # store internal variables for later
-        energies = np.concatenate([sp.energies for sp in self])
-        self._erange = [min(energies), max(energies)]
+        self._update_erange()
         
         return
     
@@ -80,7 +75,8 @@ class Spectras():
             
         return
     
-    def __pkl_to_dict(self, filename):
+    @staticmethod
+    def __pkl_to_dict(filename):
         with open(filename, 'rb') as fin:
             data = dill.load(fin)
         return data
@@ -195,6 +191,12 @@ class Spectras():
     
     def _align_label_to_mean_structure(self, label, alignment):
         
+        # can we use the sea urchin here?
+        try:
+            import sea_urchin.alignement.align as ali
+        except:
+            raise ImportError("You need SeaUrchin compiled for this to work.")
+        
         # get spectras and structures
         spectras   = self.__get_atomic_label(label)
         structures = [sp.structure for sp in spectras]
@@ -229,39 +231,6 @@ class Spectras():
         mean_structure.set_positions(np.mean(positions, axis=0))
 
         return mean_structure
-    
- 
-    # # generate a set of IAOS basis 
-    # def generate_iaos_basis(self, minao="minao"):
-        
-    #     iaos_list    = []
-    #     ref_spectras = []
-    #     for lab in set(self.labels):
-            
-    #         if lab == -1: # ignore noise
-    #             continue
-            
-    #         # get indexes where labels
-    #         tidx = np.where(self.labels == lab)[0]
-            
-    #         # get them clusters
-    #         clusters = self.comp.get_clusters_with_label(lab)
-            
-    #         # get distance matrix
-    #         mean_structure = self.get_mean_structure(lab)
-    #         dists = met.get_simple_distances(mean_structure, clusters)
-            
-    #         # find actual structure closest to mean structure and spectra
-    #         ref_idx = tidx[np.argmin(dists)]
-    #         spectra = self.spectras[ref_idx]
-            
-    #         # make the iaos
-    #         iaos = self.make_iaos(spectra.mol, spectra._mo_coeff, spectra._mo_occ, minao)
-    #         iaos_list.append(iaos)
-    #         ref_spectras.append(spectra)
-
-    #     return np.array(iaos_list), copy.deepcopy(ref_spectras)
-    
     
     def get_feature_vector(self, label=None):
         
@@ -314,6 +283,9 @@ class Spectras():
     def __get_atomic_label(self, label):
         return [sp for sp in self if sp.label == label]
     
+    def __add__(self, spectras):
+        return Spectras(self.spectras + spectras.spectras)
+    
     def _prepare_for_save(self):
         
         data = self.__dict__.copy()
@@ -324,7 +296,7 @@ class Spectras():
         
         return data
     
-    def save(self, filename="spectras.pkl"):
+    def save(self, filename="spe            has_SU = Truectras.pkl"):
         """Saves the object to a file."""
         
         data = self._prepare_for_save()
@@ -339,3 +311,20 @@ class Spectras():
     def copy(self):
         data = self._prepare_for_save()
         return Spectras(data)
+    
+    def append(self, spectra):
+        """Appends a single Spectra object to the collection.
+
+        Args:
+            spectra: A Spectra object to append.  Raises a TypeError if not a Spectra object.
+        """
+        if not isinstance(spectra, Spectra):
+            raise TypeError("Only Spectra objects can be appended.")
+        self.spectras.append(copy.deepcopy(spectra))  # Deepcopy to avoid modification of the original
+        self._update_erange() # Update energy range after appending
+        self._aligned = False # Reset alignment flag
+
+    def _update_erange(self):
+        """Updates the _erange attribute after modifications to the spectras list."""
+        energies = np.concatenate([sp.energies for sp in self])
+        self._erange = [np.min(energies), np.max(energies)]
