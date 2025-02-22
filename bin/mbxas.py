@@ -6,6 +6,8 @@ Created on Mon Jun 26 17:01:37 2023
 @author: roncofaber
 """
 
-from pymbxas.cli.main import main
+import sys
+from pymbxas.cli.pyscf import main
 
-main()
+if __name__ == "__main__":
+    sys.exit(main()) #Call main and exit with its return code

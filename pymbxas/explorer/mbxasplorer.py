@@ -15,6 +15,7 @@ import pymbxas.utils.metrics as met
 from pymbxas.utils.auxiliary import as_list
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.explorer.node import DiscreteNode, BroadenedNode
+from pymbxas.drivers.acquisitor import pyscf_acquire
 
 #%%
 
@@ -105,11 +106,38 @@ class MBXASplorer(object):
         
         return
     
-    
-    def explore(self, structure_pool, pymbxasfun, niter, nmin=20, batch_size=1,
-                initial_spectra=None):
+    def explore(self, structure_pool, niter, nmin=20, batch_size=1,
+                initial_spectras=None, acquire=None):
         
-        if initial_spectra is None:
+        # store acquisition function internally
+        if acquire is None:
+            self._acquire = pyscf_acquire
+        else:
+            self._acquire = acquire
+        
+        # setup initial model as a starting point
+        self._setup_explorer(structure_pool, initial_spectras, nmin)
+            
+        # now iterate and train better
+        for ii in range(niter):
+            
+            # get new structures and new spectra
+            new_structures = self._find_where_to_look(structure_pool, nsamples=batch_size)
+            new_spectras   = [self._acquire(structure) for structure in new_structures]
+            self._spectras.extend(new_spectras)
+            
+            self.retrain(self._spectras)
+            
+            # initialize performance test
+            m, s = self._assert_performance(structure_pool)
+            self._mean_var.append(m)
+            self._std_var.append(s)
+            
+        return
+    
+    def _setup_explorer(self, structure_pool, initial_spectras, nmin):
+        
+        if initial_spectras is None:
             # empty list
             self._spectras = []
             
@@ -118,25 +146,21 @@ class MBXASplorer(object):
             # do initial training
             initial_structures = [structure_pool[ii] for ii in iidxs]
             for structure in initial_structures:
-                spectra = pymbxasfun(structure)
+                spectra = self._acquire(structure)
                 self._spectras.append(spectra)
         else:
-            if not isinstance(initial_spectra, list):
+            if not isinstance(initial_spectras, list):
                 raise TypeError("List needed for initial spectra")
-            self._spectras = initial_spectra
-            
+            self._spectras = initial_spectras
+        
+        # train it
         self.train(self._spectras)
-            
-        # now iterate and train better
-        for ii in range(niter):
-            
-            # get new structures and new spectra
-            new_structures = self._find_where_to_look(structure_pool, nsamples=batch_size)
-            new_spectras   = [pymbxasfun(structure) for structure in new_structures]
-            self._spectras.extend(new_spectras)
-            
-            self.retrain(self._spectras)
-            
+        
+        # initialize performance test
+        m, s = self._assert_performance(structure_pool)
+        self._mean_var = [m]
+        self._std_var  = [s]
+        
         return
     
     def _find_where_to_look(self, structure_pool, beta=5.0, nsamples=1):
@@ -149,6 +173,15 @@ class MBXASplorer(object):
         tidxs = np.argsort(ucb.max(axis=1))[-nsamples:]
         
         return [structure_pool[ii] for ii in tidxs]
+    
+    def _assert_performance(self, structures):
+        
+        _, _, _, var = self.predict(structures)
+        
+        mean_var = np.mean(var.sum(axis=1))
+        std_var  = np.std(var.sum(axis=1))
+        
+        return mean_var, std_var
     
     
     def _make_node(self, spectras, peak_label, Xs, yscaler, isotropic, ykernel,
