@@ -86,6 +86,48 @@ def get_relevant_distances(clusters, idxs):
     
     return np.array(distances)
     
-    
 
+def get_zmatlike_distances(structures):
+
+    zmat = []    
+    for structure in as_list(structures):
+        zmat.append(zmatlike(structure))
+        
+    return np.array(zmat)
+
+def zmatlike(atoms):
+    """
+    Generates a feature vector of distances from an ASE Atoms object (optimized).
+
+    Args:
+        atoms: An ase.Atoms object.
+
+    Returns:
+        A 1D numpy array containing the distances. Returns None if the structure
+        is unsuitable for this representation.
+    """
+    num_atoms = len(atoms)
+    if num_atoms < 4:
+        print("Error: At least 4 atoms are required for this representation.")
+        return None
+
+    positions = atoms.get_positions()
+    
+    #Pre-allocate the array to store distances
+    feature_vector = np.empty(3 + (num_atoms - 3) * 3)
+
+    #Efficiently calculate distances for atoms 2 and 3
+    feature_vector[0] = np.linalg.norm(positions[1] - positions[0])
+    feature_vector[1] = np.linalg.norm(positions[2] - positions[0])
+    feature_vector[2] = np.linalg.norm(positions[2] - positions[1])
+
+    #Vectorized calculation for atoms 4 and beyond
+    ref_positions = positions[:3]  #Positions of the first three atoms
+    other_positions = positions[3:] #Positions of the remaining atoms
+
+    #Calculate all pairwise distances between ref_positions and other_positions
+    distances = np.linalg.norm(other_positions[:, np.newaxis, :] - ref_positions, axis=2)
+    feature_vector[3:] = distances.flatten()
+
+    return feature_vector
 

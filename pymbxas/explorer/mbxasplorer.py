@@ -43,7 +43,7 @@ class MBXASplorer(object):
             
         # define metric (must work on ASE atoms object)
         if metric is None:
-            metric = met.get_distances
+            metric = met.get_zmatlike_distances #met.get_distances
         self._metric = copy.deepcopy(metric)
         
         # generate scaler for feature vector
