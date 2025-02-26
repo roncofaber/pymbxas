@@ -140,8 +140,8 @@ class SpectralNode(object):
 
         if Yvar is not None:
             
-            Yvar_log = self.yscaler.var_*Yvar
-            Yvar = (np.exp(Yvar_log) - 1) * np.exp(2*self.yscaler.mean_ + Yvar_log)
+            # Yvar_log = self.yscaler.var_*Yvar
+            # Yvar = (np.exp(Yvar_log) - 1) * np.exp(2*self.yscaler.mean_ + Yvar_log)
             
             return Y, Yvar
         else:

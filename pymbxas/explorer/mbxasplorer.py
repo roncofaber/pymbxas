@@ -11,11 +11,15 @@ import numpy as np
 import copy
 
 # pymbxas stuff
+from pymbxas import Spectras
 import pymbxas.utils.metrics as met
 from pymbxas.utils.auxiliary import as_list
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.explorer.node import DiscreteNode, BroadenedNode
 from pymbxas.drivers.acquisitor import pyscf_acquire
+
+# let's add more packages
+from sklearn.model_selection import train_test_split
 
 #%%
 
@@ -107,7 +111,8 @@ class MBXASplorer(object):
         return
     
     def explore(self, structure_pool, niter, nmin=20, batch_size=1,
-                initial_spectras=None, acquire=None):
+                initial_spectras=None, acquire=None, test_spectras=None,
+                set_aside=None, hard_test=False):
         
         # store acquisition function internally
         if acquire is None:
@@ -116,72 +121,140 @@ class MBXASplorer(object):
             self._acquire = acquire
         
         # setup initial model as a starting point
-        self._setup_explorer(structure_pool, initial_spectras, nmin)
+        self._setup_explorer(structure_pool, initial_spectras, nmin, set_aside,
+                             hard_test)
+        
+        # train it for the first time
+        self._initialize_training()
             
         # now iterate and train better
         for ii in range(niter):
-            
-            # get new structures and new spectra
-            new_structures = self._find_where_to_look(structure_pool, nsamples=batch_size)
-            new_spectras   = [self._acquire(structure) for structure in new_structures]
-            self._spectras.extend(new_spectras)
-            
-            self.retrain(self._spectras)
-            
-            # initialize performance test
-            m, s = self._assert_performance(structure_pool)
-            self._mean_var.append(m)
-            self._std_var.append(s)
+            self._training_step(batch_size=batch_size)
             
         return
     
-    def _setup_explorer(self, structure_pool, initial_spectras, nmin):
+    def _setup_explorer(self, structure_pool, initial_spectras, nmin, set_aside,
+                        hard_test):
         
+        # initialize variables
+        self._benchmark   = None
+        self._spe2test    = None
+        self._uncertainty = []
+        self._error       = []
+        
+        # split training and testing set
+        if set_aside is not None:
+            str2train, str2test = train_test_split(structure_pool, test_size=set_aside)
+            
+            # calculate also the spectra on the testing set
+            # (slow but necessary for testing)
+            if hard_test:
+                test_spectras = [self._acquire(structure) for structure in str2test]
+                self._spe2test = Spectras(test_spectras)
+                
+                self._benchmark = self._spe2test.get_mbxas_spectras(
+                    sigma=self._broaden["sigma"], npoints=self._broaden["npoints"],
+                    erange=self._broaden["erange"])[1]
+            
+        else:
+            str2train = structure_pool
+            str2test  = None
+        
+        # store structures internally
+        self._str2train = str2train
+        self._str2test  = str2test
+        
+        self._idx2train = [] # keep in memory indexes used for training
         if initial_spectras is None:
             # empty list
             self._spectras = []
             
-            # indexing
-            iidxs = np.random.choice(list(range(len(structure_pool))), nmin)
+            # indexing to choose where to start: TODO better sampling!
+            iidxs = np.random.choice(list(range(len(str2train))), nmin)
+            
             # do initial training
-            initial_structures = [structure_pool[ii] for ii in iidxs]
-            for structure in initial_structures:
+            for idx in iidxs:
+                structure = str2train[idx]
                 spectra = self._acquire(structure)
+                
                 self._spectras.append(spectra)
+                self._idx2train.append(idx)
         else:
             if not isinstance(initial_spectras, list):
                 raise TypeError("List needed for initial spectra")
             self._spectras = initial_spectras
         
+        return
+    
+    def _initialize_training(self):
+        
         # train it
         self.train(self._spectras)
         
         # initialize performance test
-        m, s = self._assert_performance(structure_pool)
-        self._mean_var = [m]
-        self._std_var  = [s]
+        unc, err = self._assert_performance(self._str2test, spe2test=self._benchmark)
+        self._uncertainty.append(unc)
+        self._error.append(err)
+        # self._stdv_unc.append(su)
         
         return
     
-    def _find_where_to_look(self, structure_pool, beta=5.0, nsamples=1):
+    def _training_step(self, batch_size=1, beta=10.0):
         
-        _, _, mean, var = self.predict(structure_pool)
+        # get new structures and new spectra
+        new_structures, new_idxs = self._find_where_to_look(
+            self._str2train, beta=beta, nsamples=batch_size, ignore_idxs=self._idx2train
+            )
+        
+        new_spectras   = [self._acquire(structure) for structure in new_structures]
+        
+        # add to trained pool
+        self._spectras.extend(new_spectras)
+        self._idx2train.extend(new_idxs)
+        
+        # retrain
+        self.retrain(self._spectras)
+        
+        # run performance test on retrained data
+        unc, err = self._assert_performance(self._str2test, spe2test=self._benchmark)
+        self._uncertainty.append(unc)
+        self._error.append(err)
+        
+        
+        
+        return
+    
+    def _find_where_to_look(self, str2train, beta=10.0, nsamples=1, ignore_idxs=[]):
+        
+        _, _, mean, var = self.predict(str2train)
         
         #Upper Confidence Bound (UCB)
-        ucb = mean + beta * np.sqrt(var)
+        # ucb = mean + beta * np.sqrt(var)
+        ucb = beta * np.sqrt(var) # TODO for the moment only variance
         
-        tidxs = np.argsort(ucb.max(axis=1))[-nsamples:]
+        sorted_idxs = np.argsort(ucb.max(axis=1))[::-1]
         
-        return [structure_pool[ii] for ii in tidxs]
+        new_structures = []
+        used_idxs      = []
+        for idx in sorted_idxs:
+            if idx not in ignore_idxs:
+                new_structures.append(str2train[idx])
+                used_idxs.append(idx)
+                
+            if len(new_structures) == nsamples:
+                break
+                
+        return new_structures, used_idxs
     
-    def _assert_performance(self, structures):
+    def _assert_performance(self, str2test, spe2test=None):
         
-        _, _, _, var = self.predict(structures)
+        _, _, mean, uncertainty = self.predict(str2test)
         
-        mean_var = np.mean(var.sum(axis=1))
-        std_var  = np.std(var.sum(axis=1))
-        
-        return mean_var, std_var
+        error = None
+        if spe2test is not None:
+            error = np.sum((spe2test-mean)**2, axis=1)
+            
+        return uncertainty, error
     
     
     def _make_node(self, spectras, peak_label, Xs, yscaler, isotropic, ykernel,
