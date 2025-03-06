@@ -46,11 +46,12 @@ class SpectralNode(object):
         vras = np.var(Ys) # Or a visual estimate
         
         # Heuristic for lengthscales:
-        distances = pdist(Xs.T)
-        distances_matrix = squareform(distances)
-        lgts = np.median(distances_matrix, axis=0)
+        # distances = pdist(Xs.T)
+        # distances_matrix = squareform(distances)
+        # lgts = np.median(distances_matrix, axis=0)
+        lgts = (Xs.max(axis=0) - Xs.min(axis=0))/2
 
-        my_kernel = gpflow.kernels.Matern32(variance     = vras,
+        my_kernel = gpflow.kernels.Matern52(variance     = vras,
                                             lengthscales = lgts,
                                             )
         
@@ -75,7 +76,7 @@ class SpectralNode(object):
         opt.minimize(
             model.training_loss,
             model.trainable_variables,
-            options = dict(maxiter=2500),
+            options = dict(maxiter=5000),
             method  = "l-bfgs-b",
         )
         
@@ -328,7 +329,7 @@ class DiscreteNode(SpectralNode):
     
     def _predict_energy(self, Xtest):
         
-        e_pre, e_std = self.kr_e.predict_y(Xtest)
+        e_pre, e_std = self.kr_e.predict_f(Xtest)
         
         e_pre = e_pre.numpy().reshape(-1, self.n_targets)
         e_std = self._std_E*e_std.numpy()

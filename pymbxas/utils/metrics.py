@@ -87,21 +87,22 @@ def get_relevant_distances(clusters, idxs):
     return np.array(distances)
     
 
-def get_zmatlike_distances(structures):
+def get_zmatlike_distances(structures, ref_indices=[0,1,2]):
 
     zmat = []    
     for structure in as_list(structures):
-        zmat.append(zmatlike(structure))
+        zmat.append(zmatlike(structure, ref_indices=ref_indices))
         
     return np.array(zmat)
 
-def zmatlike(atoms):
+def zmatlike(atoms, ref_indices=[0,1,2]):
     """
     Generates a feature vector of distances from an ASE Atoms object (optimized).
-
+    
     Args:
         atoms: An ase.Atoms object.
-
+        ref_indices: A list or tuple of three indices to be used as reference atoms.
+    
     Returns:
         A 1D numpy array containing the distances. Returns None if the structure
         is unsuitable for this representation.
@@ -111,21 +112,29 @@ def zmatlike(atoms):
         print("Error: At least 4 atoms are required for this representation.")
         return None
 
+    if len(ref_indices) != 3:
+        print("Error: Exactly three reference indices must be provided.")
+        return None
+
+    if any(idx >= num_atoms for idx in ref_indices):
+        print("Error: Reference indices must be within the range of the number of atoms.")
+        return None
+
     positions = atoms.get_positions()
     
-    #Pre-allocate the array to store distances
+    # Pre-allocate the array to store distances
     feature_vector = np.empty(3 + (num_atoms - 3) * 3)
 
-    #Efficiently calculate distances for atoms 2 and 3
-    feature_vector[0] = np.linalg.norm(positions[1] - positions[0])
-    feature_vector[1] = np.linalg.norm(positions[2] - positions[0])
-    feature_vector[2] = np.linalg.norm(positions[2] - positions[1])
+    # Efficiently calculate distances for the three reference atoms
+    feature_vector[0] = np.linalg.norm(positions[ref_indices[1]] - positions[ref_indices[0]])
+    feature_vector[1] = np.linalg.norm(positions[ref_indices[2]] - positions[ref_indices[0]])
+    feature_vector[2] = np.linalg.norm(positions[ref_indices[2]] - positions[ref_indices[1]])
 
-    #Vectorized calculation for atoms 4 and beyond
-    ref_positions = positions[:3]  #Positions of the first three atoms
-    other_positions = positions[3:] #Positions of the remaining atoms
+    # Vectorized calculation for atoms beyond reference indices
+    ref_positions = positions[list(ref_indices)]  # Positions of the reference atoms
+    other_positions = np.delete(positions, ref_indices, axis=0)  # Positions of the remaining atoms
 
-    #Calculate all pairwise distances between ref_positions and other_positions
+    # Calculate all pairwise distances between ref_positions and other_positions
     distances = np.linalg.norm(other_positions[:, np.newaxis, :] - ref_positions, axis=2)
     feature_vector[3:] = distances.flatten()
 

@@ -47,7 +47,7 @@ class MBXASplorer(object):
             
         # define metric (must work on ASE atoms object)
         if metric is None:
-            metric = met.get_zmatlike_distances #met.get_distances
+            metric = met.get_distances
         self._metric = copy.deepcopy(metric)
         
         # generate scaler for feature vector
@@ -110,9 +110,9 @@ class MBXASplorer(object):
         
         return
     
-    def explore(self, structure_pool, niter, nmin=20, batch_size=1,
+    def explore(self, structure_pool, niter, nmin=25, batch_size=1,
                 initial_spectras=None, acquire=None, test_spectras=None,
-                set_aside=None, hard_test=False):
+                set_aside=None, hard_test=False, next_guess="ucb"):
         
         # store acquisition function internally
         if acquire is None:
@@ -129,7 +129,7 @@ class MBXASplorer(object):
             
         # now iterate and train better
         for ii in range(niter):
-            self._training_step(batch_size=batch_size)
+            self._training_step(batch_size=batch_size, next_guess=next_guess)
             
         return
     
@@ -170,7 +170,7 @@ class MBXASplorer(object):
             self._spectras = []
             
             # indexing to choose where to start: TODO better sampling!
-            iidxs = np.random.choice(list(range(len(str2train))), nmin)
+            iidxs = np.random.choice(list(range(len(str2train))), nmin, replace=False)
             
             # do initial training
             for idx in iidxs:
@@ -195,18 +195,19 @@ class MBXASplorer(object):
         unc, err = self._assert_performance(self._str2test, spe2test=self._benchmark)
         self._uncertainty.append(unc)
         self._error.append(err)
-        # self._stdv_unc.append(su)
         
         return
     
-    def _training_step(self, batch_size=1, beta=10.0):
+    def _training_step(self, batch_size=1, beta=10.0, next_guess="ucb"):
         
-        # get new structures and new spectra
+        # get new structures
         new_structures, new_idxs = self._find_where_to_look(
-            self._str2train, beta=beta, nsamples=batch_size, ignore_idxs=self._idx2train
+            self._str2train, beta=beta, nsamples=batch_size,
+            ignore_idxs=self._idx2train, next_guess=next_guess
             )
         
-        new_spectras   = [self._acquire(structure) for structure in new_structures]
+        # calculate new spectra
+        new_spectras = [self._acquire(structure) for structure in new_structures]
         
         # add to trained pool
         self._spectras.extend(new_spectras)
@@ -220,19 +221,24 @@ class MBXASplorer(object):
         self._uncertainty.append(unc)
         self._error.append(err)
         
-        
-        
         return
     
-    def _find_where_to_look(self, str2train, beta=10.0, nsamples=1, ignore_idxs=[]):
+    def _find_where_to_look(self, str2train, beta=10.0, nsamples=1, ignore_idxs=[],
+                            next_guess="ucb"):
         
-        _, _, mean, var = self.predict(str2train)
+        if next_guess == "ucb":
+            _, _, mean, var = self.predict(str2train)
+            
+            #Upper Confidence Bound (UCB)
+            # ucb = mean + beta * np.sqrt(var)
+            ucb = beta * np.sqrt(var) # TODO for the moment only variance
+            
+            sorted_idxs = np.argsort(ucb.max(axis=1))[::-1]
         
-        #Upper Confidence Bound (UCB)
-        # ucb = mean + beta * np.sqrt(var)
-        ucb = beta * np.sqrt(var) # TODO for the moment only variance
-        
-        sorted_idxs = np.argsort(ucb.max(axis=1))[::-1]
+        elif next_guess == "random":
+            sorted_idxs = list(range(len(str2train)))
+            np.random.shuffle(sorted_idxs)
+            
         
         new_structures = []
         used_idxs      = []
@@ -372,3 +378,9 @@ class MBXASplorer(object):
         if not len(idx) == 1: raise ValueError
         
         return self[idx[0]]
+
+    def _save_self(self, oname):
+        
+        import dill
+        with open(oname, "wb") as fout:
+            dill.dump(self, fout)
