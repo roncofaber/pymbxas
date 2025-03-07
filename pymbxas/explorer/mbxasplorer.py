@@ -112,7 +112,8 @@ class MBXASplorer(object):
     
     def explore(self, structure_pool, niter, nmin=25, batch_size=1,
                 initial_spectras=None, acquire=None, test_spectras=None,
-                set_aside=None, hard_test=False, next_guess="ucb"):
+                set_aside=None, hard_test=False, next_guess="ucb",
+                rseed=None):
         
         # store acquisition function internally
         if acquire is None:
@@ -122,7 +123,7 @@ class MBXASplorer(object):
         
         # setup initial model as a starting point
         self._setup_explorer(structure_pool, initial_spectras, nmin, set_aside,
-                             hard_test)
+                             hard_test, rseed)
         
         # train it for the first time
         self._initialize_training()
@@ -134,7 +135,7 @@ class MBXASplorer(object):
         return
     
     def _setup_explorer(self, structure_pool, initial_spectras, nmin, set_aside,
-                        hard_test):
+                        hard_test, rseed):
         
         # initialize variables
         self._benchmark   = None
@@ -144,7 +145,9 @@ class MBXASplorer(object):
         
         # split training and testing set
         if set_aside is not None:
-            str2train, str2test = train_test_split(structure_pool, test_size=set_aside)
+            str2train, str2test = train_test_split(structure_pool,
+                                                   test_size=set_aside,
+                                                   random_state=rseed)
             
             # calculate also the spectra on the testing set
             # (slow but necessary for testing)

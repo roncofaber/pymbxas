@@ -73,9 +73,9 @@ def generate_scaler(scaler):
 
 # get flattened upper triangular distance matrix of a list of ASE atoms
 def get_distances(clusters):
-    clusters = as_list(clusters)
-    indexes = np.triu_indices(len(clusters[0]), k=1)
-    return np.array([cc.get_all_distances()[indexes] for cc in clusters])
+    met_clusters = as_list(clusters)
+    indexes = np.triu_indices(len(met_clusters[0]), k=1)
+    return np.array([cc.get_all_distances()[indexes] for cc in met_clusters])
 
 def get_relevant_distances(clusters, idxs):
     
