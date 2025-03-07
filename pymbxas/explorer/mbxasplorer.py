@@ -142,6 +142,7 @@ class MBXASplorer(object):
         self._spe2test    = None
         self._uncertainty = []
         self._error       = []
+        self._av_err      = []
         
         # split training and testing set
         if set_aside is not None:
@@ -195,9 +196,10 @@ class MBXASplorer(object):
         self.train(self._spectras)
         
         # initialize performance test
-        unc, err = self._assert_performance(self._str2test, spe2test=self._benchmark)
+        unc, err, av_err = self._assert_performance(self._str2test, benchmark=self._benchmark)
         self._uncertainty.append(unc)
         self._error.append(err)
+        self._av_err.append(av_err)
         
         return
     
@@ -220,9 +222,10 @@ class MBXASplorer(object):
         self.retrain(self._spectras)
         
         # run performance test on retrained data
-        unc, err = self._assert_performance(self._str2test, spe2test=self._benchmark)
+        unc, err, av_err = self._assert_performance(self._str2test, benchmark=self._benchmark)
         self._uncertainty.append(unc)
         self._error.append(err)
+        self._av_err.append(av_err)
         
         return
     
@@ -255,15 +258,22 @@ class MBXASplorer(object):
                 
         return new_structures, used_idxs
     
-    def _assert_performance(self, str2test, spe2test=None):
+    def _assert_performance(self, str2test, benchmark=None):
         
-        _, _, mean, uncertainty = self.predict(str2test)
+        _, _, pred, uncertainty = self.predict(str2test)
         
-        error = None
-        if spe2test is not None:
-            error = np.sum((spe2test-mean)**2, axis=1)
+        error    = None
+        av_error = None
+        
+        if benchmark is not None:
+            error = np.sum((benchmark-pred)**2, axis=1)
             
-        return uncertainty, error
+            av_pred = np.mean(pred, axis=0)
+            av_benc = np.mean(benchmark, axis=0)
+            
+            av_error = np.sum((av_benc-av_pred)**2)
+            
+        return uncertainty, error, av_error
     
     
     def _make_node(self, spectras, peak_label, Xs, yscaler, isotropic, ykernel,
