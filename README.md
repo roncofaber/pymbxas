@@ -4,26 +4,36 @@
 
 PyMBXAS: Python-based many-body XAS implementation
 -----------------------------------------------
+
 [![PyPI version](https://badge.fury.io/py/pymbxas.svg)](https://badge.fury.io/py/pymbxas)
 
 PyMBXAS is a package for setting up, manipulating, running and visualizing Many-Body X-ray Adsorption Spectroscopy (MBXAS) calculations using Python. It has an object-oriented approach to simplify the task of spectra analysis and post-processing.
 PyMBXAS leverages the [PySCF  electronic structure code](https://github.com/pyscf/pyscf) and the [Atomic Simulation Environment (ASE)](https://wiki.fysik.dtu.dk/ase/).
 
+The `MBXASplorer` class implements a Bayesian optimization method that autonoumosly trains a Gaussian Process Regression model to learn the spectra using atomic structures as input. It is still under development, but stay tuned for when it releases!
+
 ### Requirements
+
 You need to have both PySCF and ASE installed in your Python environment. If you want to use GPU capabilities make sure to install [gpu4pyscf](https://github.com/pyscf/gpu4pyscf).
 
 ### Installation
+
 You can install the latest stable release of the package by running:
-```
+
+```bash
 pip install pymbxas
 ```
+
 or if you want the most up to date version:
-```
+
+```bash
 pip install git+https://gitlab.com/roncofaber/pymbxas.git
 ```
+
 Alternatively, you can clone the repo and add it to your `PYTHONPATH`.
 
 ### Usage
+
 To run a MBXAS calculation, you just need to set up the PySCF_mbxas object:
 
 ```python
@@ -80,8 +90,10 @@ obj.kernel(to_excite)
 # run calculation (GS + FCH + XCH)
 obj.kernel(to_excite)
 ```
+
 Output:
-```
+
+```console
 [16:01:53] |(I) 
            |----------------------------------|
            |                                  |
@@ -125,5 +137,20 @@ obj = PySCF_mbxas(pkl_file="pyscf_obj.pkl")
 
 ```
 
+### References
+
+Here are some references on the many-body approach to compute the XAS spectra of materials:
+
+- Yufeng Liang, John Vinson, Sri Pemmaraju, Walter S. Drisdell, Eric L. Shirley, and David Prendergast,  
+*Accurate x-ray spectral predictions: an advanced self-consistent-field approach inspired by many-body perturbation theory*,
+[Phys. Rev. Lett. 118, 096402 (2017)](https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.118.096402).
+- Yufeng Liang and David Prendergast,
+*Quantum many-body effects in x-ray spectra efficiently computed using a basic graph algorithm*,
+[Phys. Rev. B 97, 205127 (2018)](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.97.205127). 
+- Yufeng Liang and David Prendergast,
+*Taming convergence in the determinant approach for x-ray excitation spectra*,
+[Phys. Rev. B 100, 075121 (2019)](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.100.075121).
+
 ### Roadmap
+
 Implement Machine Learning of spectral features. The `mbxasplorer` class implements Gaussian Process Regression to predict XAS spectra of molecules, but is still WIP. In the future, expand the method to interface and help manage multiple DFT codes, expand spectra visualization and analysis capabilities, ...

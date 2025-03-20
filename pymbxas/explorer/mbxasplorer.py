@@ -94,16 +94,21 @@ class MBXASplorer(object):
         
         return
     
-    def retrain(self, spectras):
+    def retrain(self, spectras, old_nodes=None):
         
         if not self._trained: raise ValueError("Train the model first")
+        
+        if old_nodes is not None:
+            if len(self) != len(old_nodes): raise ValueError("old_nodes must have same size.")
+        else:
+            old_nodes = len(self.nodes)*[None]
         
         # calculate feature vector for all spectra and refit xscaler
         X  = self.metric([sp.structure for sp in spectras])
         Xs = self.xscaler.fit_transform(X)
         
-        for node in self.nodes:
-            node.train(spectras, Xs, retrain=True)
+        for cc, node in enumerate(self.nodes):
+            node.train(spectras, Xs, retrain=True, premodel=old_nodes[cc])
         
         self._X  = X
         self._Xs = Xs
@@ -302,7 +307,7 @@ class MBXASplorer(object):
         if not self._trained: raise ValueError("Train the model first")
         
         Xtest_s = self.scaled_metric(structures)
-        
+
         if node is None:
             nodelist = self._labels
         else:

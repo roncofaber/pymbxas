@@ -14,7 +14,7 @@ import pymbxas.utils.auxiliary as aux
 import gpflow
 
 from scipy.spatial.distance import pdist, squareform
-
+from itertools import product
 #%%
 # Base class to perform spectra fitting.
 class SpectralNode(object):
@@ -85,6 +85,66 @@ class SpectralNode(object):
         
         return model, opt
     
+    # def _fit_amplitudes(self, Xs, Ys, parameters=None):
+    #     assert self._isotropic, "So far only isotropic calculated"
+    
+    #     # Visual inspection: Estimate variance from the range of y
+    #     vras = np.var(Ys) # Or a visual estimate
+        
+    #     # Heuristic for lengthscales:
+    #     lgts = (Xs.max(axis=0) - Xs.min(axis=0))/2
+    
+    #     # Define the parameter grid
+    #     variance_values = [vras * factor for factor in [0.25, 0.5, 1.0, 2.0, 5.0]]
+    #     lengthscales_values = [lgts * factor for factor in [0.25, 0.5, 1.0, 2.0, 5.0]]
+    #     noise_variance_values = [5e-6]
+    
+    #     best_score = float('inf')
+    #     best_params = None
+    #     best_model = None
+    
+    #     # Grid search loop
+    #     for variance, lengthscales, noise_variance in product(variance_values, lengthscales_values, noise_variance_values):
+            
+    #         print("WORKING...")
+            
+    #         my_kernel = gpflow.kernels.Matern52(variance=variance, lengthscales=lengthscales)
+            
+    #         model = gpflow.models.GPR(
+    #             (Xs, Ys),
+    #             kernel=my_kernel,
+    #             noise_variance=noise_variance
+    #         )
+            
+    #         # reassign parameters
+    #         if parameters is not None:
+    #             gpflow.utilities.multiple_assign(model, parameters)
+                
+    #         # set variance as NOT trainable
+    #         gpflow.utilities.set_trainable(model.likelihood, False)
+            
+    #         # run optimizer
+    #         opt = gpflow.optimizers.Scipy()
+    #         opt.minimize(
+    #             model.training_loss,
+    #             model.trainable_variables,
+    #             options=dict(maxiter=5000),
+    #             method="l-bfgs-b",
+    #         )
+            
+    #         # Evaluate model performance
+    #         score = model.training_loss().numpy()
+            
+    #         if score < best_score:
+    #             best_score = score
+    #             best_params = (variance, lengthscales, noise_variance)
+    #             best_model = model
+    
+    #     # add parameters to history
+    #     self.lgtshist.append(best_model.parameters[0].numpy())
+        
+    #     return best_model, best_params
+
     def predict(self, Xscaled):
         e_pre, e_std = self._predict_energy(Xscaled)
         Y_pre, Y_var = self._predict_amplitude(Xscaled)
@@ -192,10 +252,10 @@ class BroadenedNode(SpectralNode):
             else: # add data
                 Y.append(amplitude)
                 Xout.append(Xdata[cc])
+                E    = np.array(energy)
             
         # define values for fitting (convert to eV)
         Xout = np.array(Xout)
-        E    = np.array(energy)
         Y    = np.array(Y).reshape(-1, npoints)
         
         return Xout, E, Y
@@ -207,7 +267,7 @@ class BroadenedNode(SpectralNode):
         return e_pre, e_std
     
     # do a training cycle
-    def train(self, spectras, Xdata, retrain=False):
+    def train(self, spectras, Xdata, retrain=False, premodel=None):
         
         # read data to use for fitting
         Xs, E, Y  = self._read_data(spectras, Xdata)
@@ -216,8 +276,11 @@ class BroadenedNode(SpectralNode):
         Ys = self.fit_transform(Y)
         
         if retrain: # reuse parameters
-            if self.kr_a is None: raise ValueError("Model has not been initialized.")
-            parameters = gpflow.utilities.parameter_dict(self.kr_a)
+            if premodel is None:
+                if self.kr_a is None: raise ValueError("Model has not been initialized.")
+                parameters = gpflow.utilities.parameter_dict(self.kr_a)
+            else:
+                parameters = gpflow.utilities.parameter_dict(premodel)
         else:
             parameters = None
             

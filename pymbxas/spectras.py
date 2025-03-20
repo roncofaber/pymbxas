@@ -145,14 +145,15 @@ class Spectras():
         if erange is None:
             erange = self._erange
         
+        E = None
         I_list = []
         for spectra in spectras:
             Et, I = spectra.get_mbxas_spectra(axis=axis, sigma=sigma,
                                              npoints=npoints, tol=tol,
                                              erange=erange, el_label=el_label)
-            if I is not None:
-                E = Et
-                I_list.append(I)
+
+            E = Et
+            I_list.append(I)
         
         return E, np.array(I_list)
    
@@ -186,6 +187,26 @@ class Spectras():
             self._align_label_to_mean_structure(lab, alignment)
             
         self._aligned = True
+        
+        return
+    
+    def align_spectras_to_structure(self, ref_structure, alignment):
+        
+        # can we use the sea urchin here?
+        try:
+            import sea_urchin.alignement.align as ali
+        except:
+            raise ImportError("You need SeaUrchin compiled for this to work.")
+        
+        # get structures
+        structures = [sp.structure for sp in self]
+        
+        # get alignments to mean structure
+        rot, tr, perm, inv, dh = ali.get_RTPI(structures, ref_structure, alignment)
+        
+        for cc, spectra in enumerate(self):
+            spectra.transform(rot=rot[cc], tr=tr[cc], perm=perm[cc],
+                              inv=inv[cc], atype=alignment["type"])
         
         return
     

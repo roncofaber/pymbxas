@@ -118,14 +118,17 @@ class PFA(object):
     @classmethod
     def filter_data(cls, datas, n_features=1, explained_var=0.975, rseed=42,
                     do_abs=True, remove_zeros=True, ztol=1e-8):
-        out_data = []
         
+        out_data = []
         for data in datas:
             
             if remove_zeros:
                 data = remove_zero_columns(data, tol=ztol)
                 
-            # Concatenate data along the feature axis
+                # Concatenate data along the feature axis
+                if do_abs:
+                    data = abs(data.T)
+                    
             if do_abs:
                 data = abs(np.concatenate(data, axis=1).T)
             

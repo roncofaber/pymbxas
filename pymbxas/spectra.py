@@ -248,16 +248,23 @@ class Spectra():
                           erange=None, el_label=None):
         
         if el_label is not None:
-            if el_label not in self._el_labels:
-                return None, None
+            # if el_label not in self._el_labels:
+                # return None, None
             
             idxs = self._el_labels == el_label
             
             amplitude = self.amplitude[:,idxs]
             energies  = self.energies[idxs] 
+            
         else:
             amplitude = self.amplitude
             energies  = self.energies
+            
+        if erange is None:
+            if energies:
+                erange = [energies.min(), energies.max()]
+            else:
+                erange = [self.energies.min(), self.energies.max()]
         
         erange, spectras = get_mbxas_spectra(energies, amplitude,
                                               sigma=sigma, npoints=npoints,
