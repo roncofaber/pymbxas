@@ -42,13 +42,13 @@ class SpectralNode(object):
     def _fit_amplitudes(self, Xs, Ys, parameters=None):
         assert self._isotropic, "So far only isotropic calculated"
 
-        # Visual inspection: Estimate variance from the range of y
+        # # Visual inspection: Estimate variance from the range of y
         vras = np.var(Ys) # Or a visual estimate
         
-        # Heuristic for lengthscales:
-        # distances = pdist(Xs.T)
-        # distances_matrix = squareform(distances)
-        # lgts = np.median(distances_matrix, axis=0)
+        # # Heuristic for lengthscales:
+        # # distances = pdist(Xs.T)
+        # # distances_matrix = squareform(distances)
+        # # lgts = np.median(distances_matrix, axis=0)
         lgts = (Xs.max(axis=0) - Xs.min(axis=0))/2
 
         my_kernel = gpflow.kernels.Matern52(variance     = vras,
@@ -71,6 +71,40 @@ class SpectralNode(object):
         # set variance as NOT trainable --> check this
         gpflow.utilities.set_trainable(model.likelihood, False)
         
+        # # Create list of kernels for each output
+        # kern_list = [
+        #     gpflow.kernels.Matern52() for _ in range(self._npoints)
+        # ]
+        
+        # # Create multi-output kernel from kernel list
+        # kernel = gpflow.kernels.SeparateIndependent(kern_list)
+        
+        # # initialization of inducing input locations (M random points from the training inputs)
+        # idxs = np.random.choice(np.arange(Xs.shape[0]), size=6, replace=False)
+        
+        # Z = Xs[idxs].copy()
+        
+        # # create multi-output inducing variables from Z
+        # iv = gpflow.inducing_variables.SharedIndependentInducingVariables(
+        #     gpflow.inducing_variables.InducingPoints(Z)
+        # )
+        
+        # # create SVGP model as usual and optimize
+        # model = gpflow.models.SVGP(
+        #     kernel, gpflow.likelihoods.Gaussian(), inducing_variable=iv, num_latent_gps=self._npoints
+        # )
+        
+        
+        # data = (Xs, Ys)
+
+        # opt = gpflow.optimizers.Scipy()
+        # opt.minimize(
+        #     model.training_loss_closure(data),
+        #     variables=model.trainable_variables,
+        #     method="l-bfgs-b",
+        #     options={"disp": 50, "maxiter": 3000},
+        # )
+        
         # run optimizer
         opt = gpflow.optimizers.Scipy()
         opt.minimize(
@@ -84,66 +118,6 @@ class SpectralNode(object):
         self.lgtshist.append(model.parameters[0].numpy())
         
         return model, opt
-    
-    # def _fit_amplitudes(self, Xs, Ys, parameters=None):
-    #     assert self._isotropic, "So far only isotropic calculated"
-    
-    #     # Visual inspection: Estimate variance from the range of y
-    #     vras = np.var(Ys) # Or a visual estimate
-        
-    #     # Heuristic for lengthscales:
-    #     lgts = (Xs.max(axis=0) - Xs.min(axis=0))/2
-    
-    #     # Define the parameter grid
-    #     variance_values = [vras * factor for factor in [0.25, 0.5, 1.0, 2.0, 5.0]]
-    #     lengthscales_values = [lgts * factor for factor in [0.25, 0.5, 1.0, 2.0, 5.0]]
-    #     noise_variance_values = [5e-6]
-    
-    #     best_score = float('inf')
-    #     best_params = None
-    #     best_model = None
-    
-    #     # Grid search loop
-    #     for variance, lengthscales, noise_variance in product(variance_values, lengthscales_values, noise_variance_values):
-            
-    #         print("WORKING...")
-            
-    #         my_kernel = gpflow.kernels.Matern52(variance=variance, lengthscales=lengthscales)
-            
-    #         model = gpflow.models.GPR(
-    #             (Xs, Ys),
-    #             kernel=my_kernel,
-    #             noise_variance=noise_variance
-    #         )
-            
-    #         # reassign parameters
-    #         if parameters is not None:
-    #             gpflow.utilities.multiple_assign(model, parameters)
-                
-    #         # set variance as NOT trainable
-    #         gpflow.utilities.set_trainable(model.likelihood, False)
-            
-    #         # run optimizer
-    #         opt = gpflow.optimizers.Scipy()
-    #         opt.minimize(
-    #             model.training_loss,
-    #             model.trainable_variables,
-    #             options=dict(maxiter=5000),
-    #             method="l-bfgs-b",
-    #         )
-            
-    #         # Evaluate model performance
-    #         score = model.training_loss().numpy()
-            
-    #         if score < best_score:
-    #             best_score = score
-    #             best_params = (variance, lengthscales, noise_variance)
-    #             best_model = model
-    
-    #     # add parameters to history
-    #     self.lgtshist.append(best_model.parameters[0].numpy())
-        
-    #     return best_model, best_params
 
     def predict(self, Xscaled):
         e_pre, e_std = self._predict_energy(Xscaled)
