@@ -6,15 +6,12 @@ Created on Fri Feb  2 15:33:50 2024
 @author: roncofaber
 """
 
+import gpflow
 import numpy as np
 
+from pymbxas.explorer.gpmodels import GPflow_model, MTGPyTorch_model
 import pymbxas.utils.metrics as met
-import pymbxas.utils.auxiliary as aux
 
-import gpflow
-
-from scipy.spatial.distance import pdist, squareform
-from itertools import product
 #%%
 # Base class to perform spectra fitting.
 class SpectralNode(object):
@@ -25,6 +22,7 @@ class SpectralNode(object):
         self._label     = peak_label
         self._broaden   = broaden
         self._isotropic = isotropic
+        self._eps       = 1e-8
         
         # initialize empty models
         self.kr_a, self.kr_e = None, None
@@ -42,82 +40,27 @@ class SpectralNode(object):
     def _fit_amplitudes(self, Xs, Ys, parameters=None):
         assert self._isotropic, "So far only isotropic calculated"
 
-        # # Visual inspection: Estimate variance from the range of y
-        vras = np.var(Ys) # Or a visual estimate
+        model = GPflow_model(Xs, Ys, parameters=parameters)
+        model.train()
         
-        # # Heuristic for lengthscales:
-        # # distances = pdist(Xs.T)
-        # # distances_matrix = squareform(distances)
-        # # lgts = np.median(distances_matrix, axis=0)
-        lgts = (Xs.max(axis=0) - Xs.min(axis=0))/2
+        # model = GPyTorch_model(Xs, Ys, parameters=parameters)
+        # model = MTGPyTorch_model(Xs, Ys, parameters=parameters)
+        # model.to_cuda()
+        # model.train()
+        
+        return model
+    
+    def _fit_energies(self, Xs, Es, parameters=None):
 
-        my_kernel = gpflow.kernels.Matern52(variance     = vras,
-                                            lengthscales = lgts,
-                                            )
+        model = GPflow_model(Xs, Es, parameters=parameters)
+        model.train()
         
-        # create GP model
-        # mean_function = gpflow.mean_functions.Constant() <<- assume data is scaled to zero
-        model = gpflow.models.GPR(
-            (Xs, Ys),
-            kernel         = my_kernel,
-            # mean_function  = mean_function,
-            noise_variance = 5e-6 # smaller than this gives error... annoying...
-        )
+        # model = GPyTorch_model(Xs, Es, parameters=parameters)
+        # model = MTGPyTorch_model(Xs, Es, parameters=parameters)
+        # model.to_cuda()
+        # model.train()
         
-        # reassign parameters
-        if parameters is not None:
-            gpflow.utilities.multiple_assign(model, parameters)
-            
-        # set variance as NOT trainable --> check this
-        gpflow.utilities.set_trainable(model.likelihood, False)
-        
-        # # Create list of kernels for each output
-        # kern_list = [
-        #     gpflow.kernels.Matern52() for _ in range(self._npoints)
-        # ]
-        
-        # # Create multi-output kernel from kernel list
-        # kernel = gpflow.kernels.SeparateIndependent(kern_list)
-        
-        # # initialization of inducing input locations (M random points from the training inputs)
-        # idxs = np.random.choice(np.arange(Xs.shape[0]), size=6, replace=False)
-        
-        # Z = Xs[idxs].copy()
-        
-        # # create multi-output inducing variables from Z
-        # iv = gpflow.inducing_variables.SharedIndependentInducingVariables(
-        #     gpflow.inducing_variables.InducingPoints(Z)
-        # )
-        
-        # # create SVGP model as usual and optimize
-        # model = gpflow.models.SVGP(
-        #     kernel, gpflow.likelihoods.Gaussian(), inducing_variable=iv, num_latent_gps=self._npoints
-        # )
-        
-        
-        # data = (Xs, Ys)
-
-        # opt = gpflow.optimizers.Scipy()
-        # opt.minimize(
-        #     model.training_loss_closure(data),
-        #     variables=model.trainable_variables,
-        #     method="l-bfgs-b",
-        #     options={"disp": 50, "maxiter": 3000},
-        # )
-        
-        # run optimizer
-        opt = gpflow.optimizers.Scipy()
-        opt.minimize(
-            model.training_loss,
-            model.trainable_variables,
-            options = dict(maxiter=5000),
-            method  = "l-bfgs-b",
-        )
-        
-        # add parameters to history
-        self.lgtshist.append(model.parameters[0].numpy())
-        
-        return model, opt
+        return model
 
     def predict(self, Xscaled):
         e_pre, e_std = self._predict_energy(Xscaled)
@@ -127,11 +70,11 @@ class SpectralNode(object):
     def _predict_amplitude(self, Xtest):
         
         # predict values
-        Y_pre, Y_var = self.kr_a.predict_f(Xtest)
+        Y_pre, Y_var = self.kr_a.predict(Xtest)
         
         # reshape and make it numpy
-        Y_pre = Y_pre.numpy().reshape(-1, self._npoints)
-        Y_var = Y_var.numpy().reshape(-1, self._npoints)
+        Y_pre = Y_pre.reshape(-1, self._npoints)
+        Y_var = Y_var.reshape(-1, self._npoints)
         
         Y_pre_uns, Y_var_uns = self.inverse_transform(Y_pre, Y_var)
         
@@ -141,49 +84,35 @@ class SpectralNode(object):
     def n_targets(self):
         return self._npoints
     
-    @property
-    def _std_A(self):
-        try:
-            variance = self.yscaler.var_
-        except:
-            return 0
-        if variance is None:
-            return 1
-        else:
-            return np.sqrt(variance)
-    
-    @property
-    def _std_E(self):
-        variance = self.escaler.var_
-        if variance is None:
-            return 1
-        else:
-            return np.sqrt(variance)
-        
     def fit_transform(self, Y):
-        Ylog = np.log(Y + 1e-12)
+        Ylog = np.log(Y + self._eps)
         return self.yscaler.fit_transform(Ylog)
     
     def transform(self, Y):
-        Ylog = np.log(Y + 1e-12)
+        Ylog = np.log(Y + self._eps)
         return self.yscaler.transform(Ylog)
     
     def inverse_transform(self, Ys, Yvar=None):
-        
-        Ylog = self.yscaler.inverse_transform(Ys)
-        Y = np.exp(Ylog)
-
-        if Yvar is not None:
-            
-            # Yvar_log = self.yscaler.var_*Yvar
-            # Yvar = (np.exp(Yvar_log) - 1) * np.exp(2*self.yscaler.mean_ + Yvar_log)
-            
-            return Y, Yvar
-        else:
-            return Y
-
-
+            # Inverse standard scaling
+            Ylog = self.yscaler.inverse_transform(Ys)
+            # Exponentiation
+            Y = np.exp(Ylog)# - self._eps
     
+            if Yvar is not None:
+                # Inverse standard scaling of uncertainties
+                Ylog_std = np.sqrt(Yvar)  # Yvar is the variance, so we take the sqrt to get the standard deviation
+                Ylog_std_transformed = Ylog_std #* self.yscaler.scale_
+    
+                # Exponentiation of uncertainties
+                Y_std = Y * Ylog_std_transformed
+    
+                # Convert standard deviation back to variance
+                Yvar_transformed = Y_std ** 2
+    
+                return Y, Yvar_transformed
+            else:
+                return Y
+
 #%%
 # class of a single electronic cluster - broadened
 
@@ -257,9 +186,9 @@ class BroadenedNode(SpectralNode):
                 parameters = gpflow.utilities.parameter_dict(premodel)
         else:
             parameters = None
-            
+        
         # do fitting for energies and amplitudes
-        self.kr_a, self.opt_a = self._fit_amplitudes(Xs, Ys, parameters=parameters)
+        self.kr_a = self._fit_amplitudes(Xs, Ys, parameters=parameters)
         
         # store data to check
         self._Xs, self._E, self._Y, self._Ys = Xs, E, Y, Ys
@@ -270,105 +199,93 @@ class BroadenedNode(SpectralNode):
 
 #%%
 # class of a single electronic cluster - discrete
-
 class DiscreteNode(SpectralNode):
     
-    def __init__(self, spectras, Xdata, yscaler="standard",
-                 isotropic=False, ykernel=None, peak_label=None):
+    def __init__(self,  spectras, Xdata, yscaler="standard", broaden=None,
+                 peak_label=None, isotropic=True, ykernel=None):
         
-        super().__init__(peak_label, None, isotropic)
+        # run super
+        super().__init__(peak_label, broaden, isotropic, yscaler)
+
+        # assign local variables
+        self._npoints = broaden["npeaks"]
         
-        # read data to use for fitting
-        self._Xs, E, A, n_targets = self._read_data(spectras, Xdata)
-        
-        self._E = E
-        self._A = A
-        self._npoints = n_targets
-        
-        # scale data accordinglspectray
-        self._Es, self._Ys = self._generate_scaler_and_scale(E, A, yscaler)
-        
-        
-        # do fitting for energies and amplitudes
-        self.kr_e = self._fit_energy(self._Xsyscaler, self._Es, n_targets, ykernel)
-        self.kr_a = self._fit_amplitudes(self._Xs, self._Ys)
+        # train model
+        self.train(spectras, Xdata)
         
         return
     
     # read data from spectra and return them
     def _read_data(self, spectras, Xdata):
         
-        # obtain number of targets
-        n_targets = int(aux.standardCount([sp._el_labels for sp in spectras],
-                                          self._label))
+        assert isinstance(self._broaden, dict) #just make sure we are working
         
-        if n_targets == 0:
-            print("WARNING: 0")
-            n_targets = 1
-        
+        npeaks = self._broaden["npeaks"]
+        sigma  = self._broaden["sigma"]
+          
         # read spectral data
         E    = []
         Y    = []
         Xout = []
         for cc, spectra in enumerate(spectras):
             
-            idxs = np.where(spectra._el_labels == self._label)[0]
+            erange = spectra.energies[:npeaks]
             
-            # ignore if wrong number of targets
-            if len(idxs) != n_targets:
-                continue
-    
-            # append energies
-            E.append(spectra.energies[idxs])
+            energy, amplitude = spectra.get_mbxas_spectra(erange   = erange,
+                                                          sigma    = sigma,
+                                                          el_label = self._label)
+            if amplitude is None:
+                continue # skip this spectra and forget about it
+            else: # add data
+                Y.append(amplitude)
+                Xout.append(Xdata[cc])
+                E.append(energy)
             
-            # append values to fit amplitude
-            amp = spectra.amplitude[:,idxs]
-            Y.append(amp**2) # append square value of the amplitude
-            
-            # store training coordinates
-            Xout.append(Xdata[cc])
-        
         # define values for fitting (convert to eV)
-        E    = np.array(E).reshape(-1, n_targets)
-        Xout = np.array(Xout) 
-        Y    = np.array(Y)
+        Xout = np.array(Xout)
+        Y    = np.array(Y).reshape(-1, npeaks)
+        E    = np.array(E)
         
-        if self._isotropic:
-            Y = np.mean(Y, axis=1).reshape(-1, n_targets)
-        
-        return Xout, E, Y, n_targets
+        return Xout, E, Y
     
-    # take read data and return scaled data while generating the scalers
-    def _generate_scaler_and_scale(self, E, Y, yscaler):
-        
-        # generate data scalers
-        self.escaler = met.generate_scaler(yscaler)
-        self.yscaler = met.generate_scaler(yscaler)
-      
-        # scale 'em
-        Es = self.escaler.fit_transform(E)
-        Ys = self.yscaler.fit_transform(Y)
-
-        return Es, Ys
-    
-    @staticmethod
-    def _fit_energy(Xs, Es, n_targets, ykernel):
-        
-        model_E = gpflow.models.GPR(
-            (Xs, Es),
-            kernel=gpflow.kernels.SquaredExponential(),
-        )
-        
-        opt_E = gpflow.optimizers.Scipy()
-        opt_E.minimize(model_E.training_loss, model_E.trainable_variables)
-        
-        return model_E
-    
+    # predict energy
     def _predict_energy(self, Xtest):
         
-        e_pre, e_std = self.kr_e.predict_f(Xtest)
+        # predict values
+        E_pre, E_var = self.kr_e.predict(Xtest)
         
-        e_pre = e_pre.numpy().reshape(-1, self.n_targets)
-        e_std = self._std_E*e_std.numpy()
+        # reshape and make it numpy
+        E_pre = E_pre.numpy().reshape(-1, self._npoints)
+        E_var = E_var.numpy().reshape(-1, self._npoints)
         
-        return np.squeeze(self.escaler.inverse_transform(e_pre)), np.squeeze(e_std)
+        E_pre_uns = self.escaler.inverse_transform(E_pre)#, Y_var)
+        
+        return np.squeeze(E_pre_uns), np.squeeze(E_var)
+    
+    # do a training cycle
+    def train(self, spectras, Xdata, retrain=False, premodel=None):
+        
+        # read data to use for fitting
+        Xs, E, Y  = self._read_data(spectras, Xdata)
+        
+        # scale data accordingly
+        Ys = self.fit_transform(Y)
+        Es = self.escaler.fit_transform(E)
+        
+        if retrain: # reuse parameters
+            if premodel is None:
+                if self.kr_a is None: raise ValueError("Model has not been initialized.")
+                parameters = gpflow.utilities.parameter_dict(self.kr_a)
+            else:
+                parameters = gpflow.utilities.parameter_dict(premodel)
+        else:
+            parameters = None
+        
+        # do fitting for energies and amplitudes
+        self.kr_a = self._fit_amplitudes(Xs, Ys, parameters=parameters)
+        self.kr_e = self._fit_energies(Xs, Es, parameters=None)
+        
+        # store data to check
+        self._Xs, self._E, self._Es, self._Y, self._Ys = Xs, E, Es, Y, Ys
+        
+        return

@@ -6,8 +6,6 @@ Created on Fri Feb 21 15:50:13 2025
 @author: roncofaber
 """
 
-from pymbxas.calculators.pyscf import PySCF_mbxas
-
 #%%
 
 def pyscf_acquire(structure, to_excite, **kwargs):
@@ -45,6 +43,9 @@ def pyscf_acquire(structure, to_excite, **kwargs):
         "save_path": None,
         "gpu": True,
     }
+    
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+    
     params = defaults.copy()
     params.update(kwargs) # Update defaults with user-provided kwargs
 

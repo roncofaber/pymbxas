@@ -248,11 +248,7 @@ class Spectra():
                           erange=None, el_label=None):
         
         if el_label is not None:
-            # if el_label not in self._el_labels:
-                # return None, None
-            
-            idxs = self._el_labels == el_label
-            
+            idxs      = self._el_labels == el_label
             amplitude = self.amplitude[:,idxs]
             energies  = self.energies[idxs] 
             
@@ -261,24 +257,25 @@ class Spectra():
             energies  = self.energies
             
         if erange is None:
-            if energies:
-                erange = [energies.min(), energies.max()]
-            else:
-                erange = [self.energies.min(), self.energies.max()]
+            erange = [self.energies.min(), self.energies.max()]
+            
+        # convert amplitude to intensity
+        intensities = self.amp2int(amplitude)
         
-        erange, spectras = get_mbxas_spectra(energies, amplitude,
+        erange, spectra = get_mbxas_spectra(energies, intensities,
                                               sigma=sigma, npoints=npoints,
                                               tol=tol, erange=erange)
-
-        if axis is None:
-            spectras = np.mean(spectras, axis=0)
-        else:
-            spectras = spectras[axis]
         
-        return erange, spectras
+        return erange, spectra
         
     def get_amplitude_tensor(self):
         return np.einsum("ij,jk->ikj", self.amplitude, self.amplitude.T)
+    
+    def amp2int(self, amplitude=None):
+        if amplitude is not None:
+            return np.linalg.norm(amplitude, axis=0)
+        else:
+            return np.linalg.norm(self.amplitude, axis=0)
     
     # get CMOs
     @property

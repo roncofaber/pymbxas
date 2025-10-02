@@ -317,7 +317,7 @@ class Spectras():
         
         return data
     
-    def save(self, filename="spe            has_SU = Truectras.pkl"):
+    def save(self, filename="spectras.pkl"):
         """Saves the object to a file."""
         
         data = self._prepare_for_save()

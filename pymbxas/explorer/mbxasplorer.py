@@ -288,10 +288,12 @@ class MBXASplorer(object):
             print(f"Node {peak_label} already exists.")
             return
         
-        if broaden is None:
+        if not isinstance(broaden, dict): raise TypeError("broaden must be dict")
+        
+        if "npeaks" in broaden:
             # fit a single excitation
-            sn = DiscreteNode(spectras, Xs, yscaler=yscaler, isotropic=isotropic,
-                              ykernel=ykernel, peak_label=peak_label)
+            sn = DiscreteNode(spectras, Xs, yscaler=yscaler, broaden=broaden,
+                         peak_label=peak_label)
         else:
             sn = BroadenedNode(spectras, Xs, yscaler=yscaler, broaden=broaden,
                          peak_label=peak_label)
