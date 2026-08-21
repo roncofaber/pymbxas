@@ -16,7 +16,12 @@ def do_localization_pyscf(dft_calc, deg_orbitals, loc_type):
         mo_loc = do_boys_pyscf(dft_calc, deg_orbitals)
     elif "ibo" in loc_type.lower():
         mo_loc = do_ibo_pyscf(dft_calc, deg_orbitals)
-        
+    else:
+        raise ValueError(
+            f"Unsupported localization type: {loc_type}. "
+            "Supported types are 'boys' and 'ibo'."
+        )
+
     return mo_loc
         
 def do_boys_pyscf(dft_calc, deg_orbitals):

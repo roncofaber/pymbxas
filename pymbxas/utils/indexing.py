@@ -8,12 +8,9 @@ Created on Thu Sep 14 15:04:46 2023
 
 import numpy as np
 
+from pymbxas.utils.auxiliary import as_list
+
 #%%
-
-
-# return copy of input as list if not one
-def as_list(inp):
-    return [inp] if not isinstance(inp, list) else inp.copy()
 
 # return list of indexes from mixed input of indexes and string (elements)
 def atoms_to_indexes(system, symbols):
@@ -22,7 +19,10 @@ def atoms_to_indexes(system, symbols):
     if symbols == "all":
         return list(range(len(system.get_chemical_symbols())))
 
-    symbols = as_list(symbols)
+    if isinstance(symbols, str):
+        symbols = [symbols]
+    else:
+        symbols = as_list(symbols)
 
     indexes = []
     for symbol in symbols:

@@ -19,7 +19,7 @@ def make_density_fitter(mol, pbc, cderi=False):
         
         # df_obj.auxbasis = pypbc.df.make_auxbasis(mol)
         
-        if cderi is not None:
+        if cderi:
             df_obj._cderi_to_save = 'saved_cderi.h5'
     else:
         raise NotImplementedError("Density fitting for non PBC systems has yet to be implemented!")
@@ -30,9 +30,8 @@ def make_density_fitter(mol, pbc, cderi=False):
 
 # Function to make a pyscf calculator that both work with PBC and not.
 def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None,
-                          dens_fit=None, calc_name=None, save=False, is_gpu=False,
-                          **kwargs):
-    
+                          dens_fit=None, calc_name=None, save=False, is_gpu=False):
+
     # with PBC
     if pbc:
         calc = getattr(pypbc.dft, calc_type)(mol, xc=xc).density_fit()
@@ -53,7 +52,9 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
             if xc is None:
                 xc = "LDA" #default to LDA
             calc = getattr(dft, calc_type)(mol, xc=xc)
-        
+        else:
+            raise ValueError("calc_type '{}' must contain 'HF' or 'KS'. Supported types: 'RHF', 'UHF', 'RKS', 'UKS'".format(calc_type))
+
     # add solvent treatment
     if solvent is not None:
         calc = calc.DDCOSMO()
