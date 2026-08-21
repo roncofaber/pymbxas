@@ -51,16 +51,15 @@ class PySCF_mbxas():
                  calc_type    = "UKS", # UKS or UHF
                  do_xch       = True,  # do XCH to align energy
                  loc_type     = "ibo", # localization routine
-                 
-                 pkl_file     = None, # reload previous calculation from pkl
+
                  target_dir   = None, # run the calculation in a target dir
-                 
+
                  xas_verbose  = 3,    # verbose level of pymbxas
                  xas_logfile  = None, # file for mbxas log
                  dft_verbose  = 3,    # verbose level of pyscf
                  dft_logfile  = None, # file for pyscf log
                  dft_output   = True, # print pyscf output or not
-                 
+
                  print_fchk   = False, # print FCHK files as calculation goes
 
                  save         = True,  # save object as pkl file
@@ -69,12 +68,7 @@ class PySCF_mbxas():
                  save_path    = None, # path of saved object
                  gpu          = False,
                  ):
-        
-        # restart object from a pkl file and terminate
-        if pkl_file is not None:
-            self._restart_from_pickle(pkl_file)
-            return
-        
+
         # store directories and path
         self._cdir = os.getcwd() # current directory
         self._tdir = os.getcwd() if target_dir is None \
@@ -83,15 +77,13 @@ class PySCF_mbxas():
         if not os.path.exists(self._tdir):
             os.makedirs(self._tdir)
 
+        self._initialize_from_scratch(structure, charge, spin,
+                                      xc, basis, pbc, solvent, calc_type,
+                                      do_xch, xas_verbose, xas_logfile,
+                                      dft_verbose, dft_logfile, dft_output,
+                                      print_fchk, save, loc_type,
+                                      save_name, save_path, save_chk, gpu)
 
-        if pkl_file is None:
-            self._initialize_from_scratch(structure, charge, spin,
-                                          xc, basis, pbc, solvent, calc_type,
-                                          do_xch, xas_verbose, xas_logfile,
-                                          dft_verbose, dft_logfile, dft_output,
-                                          print_fchk, save, loc_type,
-                                          save_name, save_path, save_chk, gpu)
-        
         return
 
     def _initialize_from_scratch(self, structure, charge, spin,
@@ -182,18 +174,13 @@ class PySCF_mbxas():
         
         # run ground state
         self.run_ground_state()
-        
-        # save object if needed
-        if self.oset["save"]:
-            self.save_object()
-        
+
         # run all specified excitations
         self.excite(excitation)
-        
+
         # save object if needed
         if self.oset["save"]:
-            self.save_object()
-            self.logger.info("Saved everything as {}".format(self.oset["save_name"]))
+            self.logger.info("Saved everything as {}".format(self.save_object()))
             
         # go back where we were
         os.chdir(self._cdir)
@@ -244,11 +231,18 @@ class PySCF_mbxas():
 
     # run the GS calculation
     def run_ground_state(self, force=False):
-        
+
         # check if GS was already performed, if so: skip
         if self._ran_GS and not force:
             self.logger.warning("GS already ran with this configuration. Skipping.")
             return
+
+        if force and self._excitations:
+            raise RuntimeError(
+                "Cannot re-run the ground state: {} excitations were computed against "
+                "the current one. Start a new calculation instead.".format(
+                    len(self._excitations)))
+
         self.logger.info("Started a new GS calculation")
         
         start_time  = time.time()
@@ -485,24 +479,50 @@ class PySCF_mbxas():
         return
     
     # restart object from pkl file previously saved
-    def _restart_from_pickle(self, pkl_file):
+    @classmethod
+    def load(cls, filename):
+        """Reopen a calculation previously written with save_object()."""
 
-        # open previously generated gpw file
-        with open(pkl_file, "rb") as fin:
-            restart = dill.load(fin)
-        
-        # convert to dict
-        data = restart.__dict__.copy()
-            
-        # make compatible with older version of pymbxas (<= 0.5.0)
-        for old_key in ["excitations"]:
-            if old_key in data:
-                new_key = "_" + old_key
-                change_key(data, old_key, new_key)
-        for del_key in ["excited_idxs"]:
-            data.pop(del_key, None)
+        obj = cls.__new__(cls)
+        obj._load_h5(filename)
+        return obj
 
-        self.__dict__ = data
+    def _load_h5(self, filename):
+
+        path = os.path.abspath(filename)
+
+        with h5.open_read(path, h5.KIND_CALCULATION) as f:
+            self.structure        = h5.read_structure(f, "structure")
+            self._parameters      = h5.read_json(f, "parameters")
+            self._output_settings = h5.read_json(f, "output_settings")
+            self.output           = h5.read_text(f, "output")
+            self._ran_GS          = bool(f.attrs["ran_GS"])
+            self._used_loc        = bool(f.attrs["used_loc"])
+
+            complete   = []
+            incomplete = []
+            for key in sorted(f["excitations"]):
+                if f["excitations"][key].attrs.get("complete", False):
+                    complete.append("excitations/" + key)
+                else:
+                    incomplete.append(key)
+
+        configure_logger(self._output_settings["xas_verbose"],
+                         log_file=self._output_settings["xas_logfile"])
+        self.logger = logging.getLogger(__name__)
+
+        for key in incomplete:
+            self.logger.warning("Skipping incomplete excitation {} in {}".format(key, path))
+
+        self.gs_data     = h5.read_snapshot(path, "/")
+        self.mol         = self.gs_data.mol
+        self.mol.verbose = self._output_settings["dft_verbose"]
+        self.df_obj      = None
+
+        self._cdir        = os.getcwd()
+        self._tdir        = os.path.dirname(path) or os.getcwd()
+        self._h5_path     = path
+        self._excitations = [Excitation.from_h5(path, key) for key in complete]
 
         return
     

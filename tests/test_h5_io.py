@@ -1,4 +1,5 @@
 import json
+import os
 
 import ase.build
 import h5py
@@ -433,3 +434,97 @@ def test_save_object_requires_a_ground_state(tmp_path):
 
     with pytest.raises(RuntimeError, match="ground state"):
         obj.save_object()
+
+
+def test_load_restores_the_ground_state(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    path = tiny_calc.save_object(oname="restart.h5", save_path=str(tmp_path))
+    back = PySCF_mbxas.load(path)
+
+    assert back._ran_GS is True
+    assert back._used_loc is False
+    assert back.df_obj is None
+    assert back.parameters == tiny_calc.parameters
+    assert back.structure == tiny_calc.structure
+    assert np.array_equal(back.gs_data.mo_coeff, tiny_calc.gs_data.mo_coeff)
+    assert np.array_equal(back.gs_data.mo_occ, tiny_calc.gs_data.mo_occ)
+    assert back.gs_data.e_tot == tiny_calc.gs_data.e_tot
+    assert back.gs_data.nelec == tiny_calc.gs_data.nelec
+    assert back.mol.natm == 3
+    assert back._tdir == str(tmp_path)
+    assert back._cdir == os.getcwd()
+    assert back.logger is not None
+
+
+def test_load_restores_excitations_lazily(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    path = tiny_calc.save_object(oname="lazyexc.h5", save_path=str(tmp_path))
+    back = PySCF_mbxas.load(path)
+
+    assert len(back.excitations) == 1
+    assert back.excited_idxs == [0]
+
+    exc = back.excitations[0]
+    ref = tiny_calc.excitations[0]
+
+    assert exc.symbol == "O"
+    assert exc.channel == ref.channel
+    assert exc.orb_idx == ref.orb_idx
+    assert set(exc.data) == {"fch", "xch"}
+    assert "mo_coeff" not in vars(exc.data["fch"])
+    assert np.array_equal(exc.data["fch"].mo_coeff, ref.data["fch"].mo_coeff)
+    assert exc.data["xch"].e_tot == ref.data["xch"].e_tot
+
+    for name in ref.mbxas:
+        assert np.array_equal(exc.mbxas[name], ref.mbxas[name])
+
+
+def test_loaded_object_skips_a_finished_atom(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    path = tiny_calc.save_object(oname="skip.h5", save_path=str(tmp_path))
+    back = PySCF_mbxas.load(path)
+
+    back.excite(0)
+    assert len(back.excitations) == 1
+
+
+def test_loaded_object_produces_a_spectra(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.spectra import Spectra
+
+    path = tiny_calc.save_object(oname="tospectra.h5", save_path=str(tmp_path))
+    spectra = PySCF_mbxas.load(path).to_spectra()
+
+    assert isinstance(spectra, Spectra)
+    assert np.array_equal(spectra._energies, tiny_calc.excitations[0].mbxas["energies"])
+
+
+def test_load_skips_incomplete_excitation_groups(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    path = tiny_calc.save_object(oname="broken.h5", save_path=str(tmp_path))
+    with h5py.File(path, "r+") as f:
+        del f["excitations/000"].attrs["complete"]
+
+    back = PySCF_mbxas.load(path)
+    assert back.excitations == []
+
+
+def test_force_ground_state_rerun_is_refused_after_load(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    path = tiny_calc.save_object(oname="refuse.h5", save_path=str(tmp_path))
+    back = PySCF_mbxas.load(path)
+
+    with pytest.raises(RuntimeError, match="excitations"):
+        back.run_ground_state(force=True)
+
+
+def test_pkl_file_keyword_is_gone():
+    import inspect
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    assert "pkl_file" not in inspect.signature(PySCF_mbxas.__init__).parameters

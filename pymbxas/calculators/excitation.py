@@ -11,6 +11,7 @@ import copy
 
 # self module utilities
 from pymbxas.io.data import pyscf_data
+from pymbxas.io import h5
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
@@ -18,8 +19,11 @@ from pymbxas.mbxas.mbxas import run_MBXAS_pyscf
 
 # pyscf stuff
 from pyscf.scf.addons import mom_occ
+import numpy as np
 
 #%%
+
+CORE_HOLE_OVERLAP_TOL = 0.8
     
 class Excitation(object):
     
@@ -44,10 +48,8 @@ class Excitation(object):
         
         # check that the orbitals are not still delocalized
         if not len(orb_idx) == 1:
-            logger.error("It seems that the atomic orbitals are still delocalized.")
-            logger.error("Excitation of {:<2} atom #{:>2} aborted.".format(
-                self.symbol, self.ato_idx))
-            return
+            raise ValueError("Excitation of {:<2} atom #{:>2}: orbital is still delocalized (found {} 1s orbitals).".format(
+                self.symbol, self.ato_idx, len(orb_idx)))
         
         # assign index of the orbital to excite
         self.orb_idx = orb_idx[0]
@@ -58,10 +60,29 @@ class Excitation(object):
             
         # run excitation
         self._excite(structure, gs_data, parameters, df_obj, logger, oset)
-        
+
         return
-    
-    
+
+    @classmethod
+    def from_h5(cls, path, key):
+        exc = cls.__new__(cls)
+
+        with h5.open_plain(path) as f:
+            group = f[key]
+            exc.ato_idx = int(group.attrs["ato_idx"])
+            exc.symbol  = h5.read_attr_str(group, "symbol")
+            exc.channel = int(group.attrs["channel"])
+            exc.orb_idx = int(group.attrs["orb_idx"])
+
+            names      = [name for name in ("fch", "xch") if name in group]
+            exc.output = {name: h5.read_text(group[name], "output") for name in names}
+            exc.mbxas  = {name: group["mbxas"][name][()] for name in group["mbxas"]}
+
+        exc.data = {name: h5.read_snapshot(path, "{}/{}".format(key, name), lazy=True)
+                    for name in names}
+
+        return exc
+
     # use it to run excitation of the selected atom
     def _excite(self, structure, gs_data, parameters, df_obj, logger, oset):
         
@@ -70,10 +91,13 @@ class Excitation(object):
         
         # run FCH
         self._run_fch(structure, gs_data, parameters, df_obj, logger, oset)
-        
-        # run XCH
-        self._run_xch(structure, gs_data, parameters, df_obj, logger, oset)
-        
+
+        # run XCH if enabled
+        if parameters["xch"]:
+            self._run_xch(structure, gs_data, parameters, df_obj, logger, oset)
+        else:
+            logger.info("XCH alignment skipped; returned energies are raw FCH eigenvalues.")
+
         # run MBXAS
         self._run_mbxas(gs_data, logger)
         
@@ -118,7 +142,7 @@ class Excitation(object):
                                          pbc=pbc, solvent=solvent,
                                          dens_fit=df_obj, calc_name="fch",
                                          save=oset["save_chk"],
-                                         gpu=oset["is_gpu"],)
+                                         is_gpu=oset["is_gpu"])
 
         # Construct new density matrix with new occupation pattern
         dm_u = fch_calc.make_rdm1(scf_guess, occupation)
@@ -126,15 +150,35 @@ class Excitation(object):
         # Apply mom occupation principle
         fch_calc = mom_occ(fch_calc, scf_guess, occupation)
 
-        # Start new SCF with new density matrix
-        fch_calc.scf(dm_u)
+        try:
+            # Start new SCF with new density matrix
+            fch_calc.scf(dm_u)
+            if not fch_calc.converged:
+                raise RuntimeError("FCH SCF did not converge for {} atom #{}".format(
+                    self.symbol, self.ato_idx))
 
-        # store input/output
-        self.output["fch"] = fch_calc.stdout.log.getvalue()
-        self.data["fch"]   = pyscf_data(fch_calc)
-        
-        # close logfile of mol if exists
-        fch_mol.stdout.close()
+            # Check that core hole survived (MOM can variationally collapse)
+            hole_idx = np.where(fch_calc.mo_occ[self.channel] == 0)[0][0]
+            c_hole = fch_calc.mo_coeff[self.channel][:, hole_idx]
+            S = fch_mol.intor("int1e_ovlp")
+            gs_coeff = gs_data.mo_coeff[self.channel][:, self.orb_idx]
+            if hasattr(c_hole, 'get'):
+                c_hole = c_hole.get()
+            if hasattr(gs_coeff, 'get'):
+                gs_coeff = gs_coeff.get()
+            overlap = abs(c_hole @ S @ gs_coeff)
+            logger.debug("Core hole overlap for {} atom #{}: {:.5f}".format(
+                self.symbol, self.ato_idx, overlap))
+            if overlap < CORE_HOLE_OVERLAP_TOL:
+                raise RuntimeError("Core hole collapsed to ground state for {} atom #{} (overlap {:.5f} < {})".format(
+                    self.symbol, self.ato_idx, overlap, CORE_HOLE_OVERLAP_TOL))
+        finally:
+            # store input/output
+            self.output["fch"] = fch_calc.stdout.log.getvalue()
+            self.data["fch"]   = pyscf_data(fch_calc)
+
+            # close logfile of mol if exists
+            fch_mol.stdout.close()
             
         logger.info(">>>>> FCH finished in {:.1f} s.".format(time.time() - start_time))
         return
@@ -179,7 +223,7 @@ class Excitation(object):
                                          pbc=pbc, solvent=solvent,
                                          dens_fit=df_obj, calc_name="xch",
                                          save=oset["save_chk"],
-                                         gpu=oset["is_gpu"])
+                                         is_gpu=oset["is_gpu"])
 
         # Construct new density matrix with new occupation pattern
         dm_u = xch_calc.make_rdm1(scf_guess, occupation)
@@ -187,19 +231,19 @@ class Excitation(object):
         # Apply mom occupation principle
         xch_calc = mom_occ(xch_calc, scf_guess, occupation)
 
-        # Start new SCF with new density matrix
-        xch_calc.scf(dm_u)
-        
-        # reconvert to cpu cause otherwise stuff is iffy
-        # if self.oset["is_gpu"]:
-            # xch_calc = xch_calc.to_cpu()
+        try:
+            # Start new SCF with new density matrix
+            xch_calc.scf(dm_u)
+            if not xch_calc.converged:
+                raise RuntimeError("XCH SCF did not converge for {} atom #{}".format(
+                    self.symbol, self.ato_idx))
+        finally:
+            # store input/output
+            self.output["xch"] = xch_calc.stdout.log.getvalue()
+            self.data["xch"]   = pyscf_data(xch_calc)
 
-        # store input/output
-        self.output["xch"] = xch_calc.stdout.log.getvalue()
-        self.data["xch"]   = pyscf_data(xch_calc)
-        
-        # close logfile of mol if exists
-        xch_mol.stdout.close()
+            # close logfile of mol if exists
+            xch_mol.stdout.close()
 
         logger.info(">>>>> XCH finished in {:.1f} s.".format(time.time() - start_time))
         
@@ -207,13 +251,14 @@ class Excitation(object):
     
     # run MBXAS from a set of pySCF calculations
     def _run_mbxas(self, gs_data, logger):
-        
+
         start_time = time.time()
         logger.info(">>> Started MBXAS calculation.")
 
+        xch_data = self.data["xch"].to_cpu() if "xch" in self.data else None
         energies, absorption, mb_ovlp, dip_KS, b_ovlp = run_MBXAS_pyscf(
             gs_data.mol, gs_data.to_cpu(), self.data["fch"].to_cpu(),
-            self.orb_idx, channel=self.channel, xch_calc=self.data["xch"].to_cpu())
+            self.orb_idx, channel=self.channel, xch_calc=xch_data)
 
         self.mbxas = {
             "energies"   : energies,
