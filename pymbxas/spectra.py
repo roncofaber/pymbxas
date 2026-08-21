@@ -211,7 +211,7 @@ class Spectra():
         # calculate inversion contribution
         inv_A = inv**get_l_val(mol)
         
-        # calculate rotated MOs — handle both old (2D) and new (3D) formats
+        # calculate rotated MOs - handle both old (2D) and new (3D) formats
         if np.asarray(self._mo_coeff).ndim == 3:
             ali_MOs = np.array([(inv_A*U).T.dot(self._mo_coeff[ch][AO_permutation])
                                 for ch in range(self._mo_coeff.shape[0])])
@@ -318,7 +318,7 @@ class Spectra():
             amplitude = self.amplitude
         return np.sum(amplitude**2, axis=0) / amplitude.shape[0]
     
-    # channel-aware accessors — handle both old (1D occ / 2D coeff)
+    # channel-aware accessors - handle both old (1D occ / 2D coeff)
     # and new (2D occ / 3D coeff) formats transparently
     @property
     def _active_mo_occ(self):
