@@ -9,17 +9,17 @@ Created on Mon Jun 26 10:33:37 2023
 # data manipulation
 import numpy as np
 from functools import reduce
-import dill
+import copy
 
 # pymbxas utils
 from pymbxas.build.structure import rotate_structure, ase_to_mole
 from pymbxas.utils.basis import get_AO_permutation, get_l_val
 from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.write import write_data_to_fchk
-from pymbxas.utils.auxiliary import change_key
+from pymbxas.io import h5
 
 # pyscf stuff
-from pyscf import lo
+from pyscf import gto, lo
 from pyscf.lo import iao, orth
 
 from ase import units
@@ -33,12 +33,10 @@ class Spectra():
 
     def __init__(self, pyscf_obj, excitation=None):
         if isinstance(pyscf_obj, (str, dict)):
-            self.__restart(pyscf_obj)
-        elif hasattr(pyscf_obj, "excitations"): #check if it has the excitations attribute
-            self.__initialize_spectra(pyscf_obj, excitation)
-        else:
-            raise TypeError("Invalid pyscf_obj type.  Must be a path to a pickle file,\
-                            a dictionary, or a pyscf object with excitations.")
+            raise TypeError("Spectra() no longer loads files; use Spectra.load(path).")
+        if not hasattr(pyscf_obj, "excitations"):
+            raise TypeError("Invalid pyscf_obj type. Must be a pyscf object with excitations.")
+        self.__initialize_spectra(pyscf_obj, excitation)
 
     # function that reads and initialize the spectra object #TODO this is mostly to be updated
     def __initialize_spectra(self, pyscf_obj, excitation):
@@ -93,49 +91,78 @@ class Spectra():
     def gs_energy(self):
         return Ha*self._gs_energy
     
-    def __restart(self, pyscf_obj):
-        """Restarts the Spectra object from a dictionary or pickle file."""
-        
-        try:
-            if isinstance(pyscf_obj, dict):
-                data = pyscf_obj.copy()
-            elif isinstance(pyscf_obj, str):
-                with open(pyscf_obj, 'rb') as fin:
-                    data = dill.load(fin)
-            else:
-                raise TypeError("pyscf_obj must be a dictionary or a string path to a pickle file.")
+    @classmethod
+    def load(cls, filename):
+        with h5.open_read(filename, h5.KIND_SPECTRA) as f:
+            return cls._from_group(f)
 
-            # Backward compatibility for older pymbxas versions
-            for old_key, new_key in [("energies", "_energies"), ("gs_energy", "_gs_energy"), ("amplitude", "_amplitude")]:
-                if old_key in data:
-                    change_key(data, old_key, new_key)
+    @classmethod
+    def _from_group(cls, group):
+        obj = cls.__new__(cls)
+        obj._read_from(group)
+        return obj
 
-            # Handle missing keys gracefully
-            for key in ["_exc_idx", "_el_labels", "_channel"]:
-                if key not in data:
-                    data[key] = None
+    def _write_into(self, group):
+        h5.write_str(group, "mol", self.mol.dumps())
+        h5.write_structure(group, "structure", self.structure)
+        h5.write_json(group, "calc_settings", self.calc_settings)
 
-            if data["_channel"] is None:
-                data["_channel"] = 1  # historical default was always beta
+        scf = group.create_group("scf")
+        h5.write_array(scf, "mo_coeff", np.asarray(self._mo_coeff))
+        h5.write_array(scf, "mo_occ", np.asarray(self._mo_occ))
 
-            if data["_el_labels"] is None:
-                mo_occ = data["_mo_occ"]
-                if np.asarray(mo_occ).ndim == 2:
-                    mo_occ = mo_occ[data["_channel"]]
-                data["_el_labels"] = np.array([-1] * len(np.where(mo_occ == 0)[0][1:]))
+        xas = group.create_group("xas")
+        h5.write_array(xas, "energies", np.asarray(self._energies))
+        h5.write_array(xas, "amplitude", np.asarray(self._amplitude))
+        h5.write_array(xas, "el_labels", np.asarray(self._el_labels))
 
-            # assign data and make mol object
-            self.__dict__ = data
+        group.attrs["channel"]   = int(self._channel)
+        group.attrs["exc_idx"]   = -1 if self._exc_idx is None else int(self._exc_idx)
+        group.attrs["label"]     = int(self._label)
+        group.attrs["gs_energy"] = float(self._gs_energy)
+        return
+
+    def _read_from(self, group):
+        self.structure     = h5.read_structure(group, "structure")
+        self.calc_settings = h5.read_json(group, "calc_settings")
+
+        xas = group["xas"]
+        self._energies  = xas["energies"][()]
+        self._amplitude = xas["amplitude"][()]
+        self._el_labels = xas["el_labels"][()]
+
+        exc_idx = int(group.attrs["exc_idx"])
+        self._channel   = int(group.attrs["channel"])
+        self._exc_idx   = None if exc_idx < 0 else exc_idx
+        self._label     = int(group.attrs["label"])
+        self._gs_energy = float(group.attrs["gs_energy"])
+
+        self._h5_source = (group.file.filename, group.name)
+
+        if "mol" in group:
+            self.mol = gto.loads(h5.read_str(group, "mol"))
+            self.mol.verbose = 0
+        else:
             self.make_mol()
-            
-        except (FileNotFoundError, EOFError, dill.UnpicklingError) as e:
-            print(f"Error loading spectra object: {e}")
-            raise
-    
-    def __pkl_to_dict(self, filename):
-        with open(filename, 'rb') as fin:
-            data = dill.load(fin)
-        return data
+        return
+
+    def __getattr__(self, name):
+        if name in ("_mo_coeff", "_mo_occ"):
+            source = self.__dict__.get("_h5_source")
+            if source is not None:
+                value = h5.read_lazy_field(source, name[1:])
+                self.__dict__[name] = value
+                return value
+        raise AttributeError(name)
+
+    def materialize(self):
+        """Force deferred orbital coefficients to be read from disk."""
+        if self.__dict__.get("_h5_source") is None:
+            return
+        self._mo_coeff
+        self._mo_occ
+        self.__dict__.pop("_h5_source", None)
+        return
     
     def align_to(self, structure, alignment):
         
@@ -333,39 +360,23 @@ class Spectra():
         
         return
     
-    # use this to remake mol obj (useful for reloading with dill)
     def make_mol(self):
         self.mol = ase_to_mole(self.structure, verbose=0, **self.calc_settings)
         return
     
-    def _prepare_for_save(self):
-        """
-        Returns:
-            dict: A dictionary containing data to be serialized.
-        """
-        data = self.__dict__.copy()
-        del data["mol"]
-        return data
-    
-    def save(self, filename="spectra.pkl"):
-        """Saves the object to a file."""
-        
-        data = self._prepare_for_save()
-      
-        # Save to file
-        with open(filename, 'wb') as fout:
-            dill.dump(data, fout)
-            
+    def save(self, filename="spectra.h5"):
+        """Saves the object to an HDF5 file."""
+        with h5.create(filename, h5.KIND_SPECTRA) as fout:
+            self._write_into(fout)
         return
     
     @property
     def exc_idx(self):
         return self._exc_idx
     
-    # use it to return a copy of the spectra
     def copy(self):
-        data = self._prepare_for_save()
-        return Spectra(data)
+        self.materialize()
+        return copy.deepcopy(self)
 
     def __repr__(self):
         chemfor = self.structure.get_chemical_formula()

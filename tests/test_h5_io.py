@@ -225,3 +225,92 @@ def test_snapshot_without_mo_coeff_del_reports_absent(tmp_path):
     for lazy in (False, True):
         back = h5.read_snapshot(str(path), "/", lazy=lazy)
         assert getattr(back, "mo_coeff_del", None) is None
+
+
+def _hand_built_spectra():
+    from pymbxas.spectra import Spectra
+
+    mf  = _tiny_uks()
+    nao = mf.mol.nao
+
+    sp = Spectra.__new__(Spectra)
+    sp.mol           = mf.mol
+    sp.structure     = ase.build.molecule("H2O")
+    sp._exc_idx      = 0
+    sp.calc_settings = {"charge": 0, "spin": 0, "xc": "lda", "basis": "sto-3g",
+                        "solvent": None, "pbc": False, "loc": "ibo",
+                        "xch": True, "calc_type": "UKS"}
+    sp._gs_energy = -76.0
+    sp._energies  = np.linspace(19.0, 20.0, 4)
+    sp._amplitude = np.arange(12, dtype=np.float64).reshape(3, 4)
+    sp._mo_coeff  = np.asarray(mf.mo_coeff)
+    sp._mo_occ    = np.asarray(mf.mo_occ)
+    sp._channel   = 1
+    sp._el_labels = np.array([-1, -1, 2, 2])
+    sp._label     = 7
+    return sp
+
+
+def test_spectra_roundtrip(tmp_path):
+    from pymbxas.spectra import Spectra
+
+    sp   = _hand_built_spectra()
+    path = tmp_path / "spectra.h5"
+    sp.save(str(path))
+
+    back = Spectra.load(str(path))
+
+    assert np.array_equal(back._energies, sp._energies)
+    assert np.array_equal(back.energies, sp.energies)
+    assert np.array_equal(back._amplitude, sp._amplitude)
+    assert np.array_equal(back._mo_coeff, sp._mo_coeff)
+    assert np.array_equal(back._mo_occ, sp._mo_occ)
+    assert np.array_equal(back._el_labels, sp._el_labels)
+    assert np.array_equal(back.CMO, sp.CMO)
+    assert back._channel == 1
+    assert back._exc_idx == 0
+    assert back._label == 7
+    assert back._gs_energy == -76.0
+    assert back.calc_settings == sp.calc_settings
+    assert back.structure == sp.structure
+    assert back.mol.natm == 3
+    assert np.allclose(back.mol.atom_coords(), sp.mol.atom_coords())
+
+
+def test_spectra_load_defers_mo_coeff(tmp_path):
+    from pymbxas.spectra import Spectra
+
+    sp   = _hand_built_spectra()
+    path = tmp_path / "lazyspectra.h5"
+    sp.save(str(path))
+
+    back = Spectra.load(str(path))
+    assert "_mo_coeff" not in vars(back)
+    assert np.array_equal(back._mo_coeff, sp._mo_coeff)
+    assert "_mo_coeff" in vars(back)
+
+    other = Spectra.load(str(path))
+    other.materialize()
+    assert "_mo_occ" in vars(other)
+
+
+def test_spectra_copy_is_independent(tmp_path):
+    from pymbxas.spectra import Spectra
+
+    sp   = _hand_built_spectra()
+    path = tmp_path / "copyme.h5"
+    sp.save(str(path))
+
+    back = Spectra.load(str(path))
+    dup  = back.copy()
+    dup._amplitude[0, 0] = 999.0
+
+    assert back._amplitude[0, 0] != 999.0
+    assert isinstance(dup, Spectra)
+
+
+def test_spectra_constructor_rejects_a_path(tmp_path):
+    from pymbxas.spectra import Spectra
+
+    with pytest.raises(TypeError, match="Spectra.load"):
+        Spectra(str(tmp_path / "whatever.h5"))
