@@ -8,7 +8,6 @@ Created on Tue Aug  1 18:13:29 2023
 
 # os 'n similar
 import os
-import dill
 import time
 import logging
 
@@ -23,6 +22,7 @@ from pymbxas.utils.auxiliary import as_list, change_key
 from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.data import pyscf_data
 from pymbxas.io.config import configure_logger
+from pymbxas.io import h5
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
@@ -46,7 +46,7 @@ class PySCF_mbxas():
                  spin         = 0,
                  xc           = "b3lyp",
                  basis        = "def2-svpd",
-                 pbc          = False, # enable PBC or not
+                 pbc          = None, # infer from structure, or override with explicit bool
                  solvent      = None,  # specify solvent epsilon
                  calc_type    = "UKS", # UKS or UHF
                  do_xch       = True,  # do XCH to align energy
@@ -62,10 +62,10 @@ class PySCF_mbxas():
                  dft_output   = True, # print pyscf output or not
                  
                  print_fchk   = False, # print FCHK files as calculation goes
-                 
+
                  save         = True,  # save object as pkl file
                  save_chk     = False, # save calculation as chkfile
-                 save_name    = "pyscf_obj.pkl", # name of saved file
+                 save_name    = "pymbxas_obj.h5", # name of saved file
                  save_path    = None, # path of saved object
                  gpu          = False,
                  ):
@@ -126,25 +126,31 @@ class PySCF_mbxas():
 
         # store calculation details
         self.structure = structure
-        
+
+        # resolve and check PBC
+        pbc_resolved = check.check_pbc(pbc, structure)
+        if pbc_resolved:
+            raise NotImplementedError("MBXAS is not supported under periodic boundary conditions: the position operator used for the transition dipoles (int1e_r) is not periodic, so the lattice-summed integrals are not physically meaningful. Use a molecular or cluster model instead.")
+
         self._parameters = {
             "charge"   : charge,
             "spin"     : spin,
             "xc"       : xc,
             "basis"    : basis,
             "solvent"  : solvent,
-            "pbc"      : check.check_pbc(pbc, structure),
+            "pbc"      : pbc_resolved,
             "loc"      : loc_type,
             "xch"      : do_xch,
             "calc_type": calc_type,
             # ... add more parameters as needed
             }
-        
+
         # initialize empty stuff
         self.output        = {}
         self.data          = {}
         self._excitations  = []
-              
+        self._h5_path      = None
+
         return
     
     # run all pymbxas from scratch
@@ -219,18 +225,20 @@ class PySCF_mbxas():
         
         return
     
-    # perform a single excitation 
+    # perform a single excitation
     def _single_excite(self, ato_idx, channel):
-         
+
         if ato_idx in self.excited_idxs:
-            return 
-            
-        excitation = Excitation(self.structure, self.gs_data, ato_idx,
-                                self.parameters, channel, self.df_obj,
-                                self.oset, self.logger)
-        
-        self._excitations.append(excitation)
-            
+            return
+
+        try:
+            excitation = Excitation(self.structure, self.gs_data, ato_idx,
+                                    self.parameters, channel, self.df_obj,
+                                    self.oset, self.logger)
+            self._excitations.append(excitation)
+        except (ValueError, RuntimeError) as e:
+            self.logger.error(str(e))
+
         return
         
 
@@ -261,11 +269,13 @@ class PySCF_mbxas():
         gs_calc = make_pyscf_calculator(gs_mol, xc, pbc=pbc, solvent=solvent,
                                         calc_type=calc_type, dens_fit=None,
                                         calc_name="gs", save=self.oset["save_chk"],
-                                        gpu=self.oset["is_gpu"])
+                                        is_gpu=self.oset["is_gpu"])
 
         # run SCF #TODO: check how to change convergence parameters
         gs_calc.kernel()
-        
+        if not gs_calc.converged:
+            raise RuntimeError("Ground state SCF did not converge")
+
         # store input/output
         self.output  = gs_calc.stdout.log.getvalue()
         self.gs_data = pyscf_data(gs_calc)
@@ -323,7 +333,7 @@ class PySCF_mbxas():
         
         # localize up to highest degenerate orbital #TEST
         if loc_type.endswith("m"):
-            s1_orbitals = [list(range(np.max(orb))) for orb in s1_orbitals]
+            s1_orbitals = [list(range(np.max(orb) + 1)) for orb in s1_orbitals]
             
         
         mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
@@ -390,34 +400,87 @@ class PySCF_mbxas():
 
         return erange, spectras
 
-    # save object as pkl file
     def save_object(self, oname=None, save_path=None):
         """
-        Run localization procedure if needed.
-        
-        Parameters:
-        dft_calc: DFT calculation object.
-        loc_type (str): Localization type.
-        
+        Write the calculation to an HDF5 file, appending any excitation that
+        is not on disk yet.
+
         Returns:
-        None
+        str: path of the file written.
         """
-        
+
+        if not self._ran_GS:
+            raise RuntimeError("Cannot save before the ground state has been run.")
+
+        path = self._resolve_save_path(oname, save_path)
+
+        if not os.path.exists(path):
+            self._write_header(path)
+
+        self._append_excitations(path)
+        self._h5_path = path
+
+        return path
+
+    def _resolve_save_path(self, oname, save_path):
+
         if oname is None:
             oname = self.oset["save_name"]
 
-        if save_path is None:
-            path = self._tdir
-        else:
-            path = save_path
+        root = self._tdir if save_path is None else save_path
 
-        if oname.endswith(".pkl"):
-            oname =  path + "/" + oname
-        else:
-            oname = path + "/" + oname.split(".")[-1] + ".pkl"
+        if not oname.endswith(".h5"):
+            oname = os.path.splitext(oname)[0] + ".h5"
 
-        with open(oname, 'wb') as fout:
-            dill.dump(self, fout)
+        return os.path.join(root, oname)
+
+    def _write_header(self, path):
+
+        with h5.create(path, h5.KIND_CALCULATION) as f:
+            f.attrs["ran_GS"]   = bool(self._ran_GS)
+            f.attrs["used_loc"] = bool(self._used_loc)
+
+            h5.write_structure(f, "structure", self.structure)
+            h5.write_json(f, "parameters", self._parameters)
+            h5.write_json(f, "output_settings", self._output_settings)
+            h5.write_text(f, "output", self.output if isinstance(self.output, str) else "")
+            h5.write_snapshot(f, self.gs_data)
+
+            f.create_group("excitations")
+
+        return
+
+    def _append_excitations(self, path):
+
+        with h5.append(path) as f:
+            root = f["excitations"]
+
+            for idx, exc in enumerate(self._excitations):
+                key = "{:03d}".format(idx)
+
+                if key in root:
+                    if root[key].attrs.get("complete", False):
+                        continue
+                    del root[key]
+
+                group = root.create_group(key)
+                group.attrs["ato_idx"] = int(exc.ato_idx)
+                group.attrs["symbol"]  = exc.symbol
+                group.attrs["channel"] = int(exc.channel)
+                group.attrs["orb_idx"] = int(exc.orb_idx)
+
+                for name in ("fch", "xch"):
+                    if name not in exc.data:
+                        continue
+                    sub = group.create_group(name)
+                    h5.write_snapshot(sub, exc.data[name])
+                    h5.write_text(sub, "output", exc.output.get(name, ""))
+
+                mbxas = group.create_group("mbxas")
+                for name, value in exc.mbxas.items():
+                    h5.write_array(mbxas, name, np.asarray(value))
+
+                group.attrs["complete"] = True
 
         return
     

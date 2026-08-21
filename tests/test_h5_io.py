@@ -343,3 +343,93 @@ def test_spectras_constructor_rejects_a_path(tmp_path):
 
     with pytest.raises(TypeError, match="Spectras.load"):
         Spectras(str(tmp_path / "whatever.h5"))
+
+
+@pytest.fixture(scope="session")
+def tiny_calc(tmp_path_factory):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    workdir = tmp_path_factory.mktemp("tiny")
+    obj = PySCF_mbxas(
+        structure=ase.build.molecule("H2O"),
+        charge=0, spin=0, xc="lda", basis="sto-3g", calc_type="UKS",
+        loc_type="ibo", xas_verbose=1, dft_verbose=0, dft_output=False,
+        save=False, target_dir=str(workdir))
+    obj.kernel("O")
+    return obj
+
+
+def test_save_object_writes_chkfile_shaped_root(tiny_calc, tmp_path):
+    from pyscf.scf import chkfile as pyscf_chkfile
+
+    path = tiny_calc.save_object(oname="calc.h5", save_path=str(tmp_path))
+    assert path == str(tmp_path / "calc.h5")
+
+    with h5py.File(path, "r") as f:
+        assert h5.read_attr_str(f, "kind") == "calculation"
+        assert int(f.attrs["schema_version"]) == h5.SCHEMA_VERSION
+        assert bool(f.attrs["ran_GS"]) is True
+        assert bool(f.attrs["used_loc"]) is False
+        assert set(f["scf"]) >= {"e_tot", "mo_coeff", "mo_occ", "mo_energy", "nelec"}
+        assert "mo_coeff_del" not in f["scf"]
+        assert sorted(f["excitations"]) == ["000"]
+
+        exc = f["excitations/000"]
+        assert int(exc.attrs["ato_idx"]) == 0
+        assert h5.read_attr_str(exc, "symbol") == "O"
+        assert int(exc.attrs["channel"]) == 1
+        assert int(exc.attrs["orb_idx"]) == tiny_calc.excitations[0].orb_idx
+        assert bool(exc.attrs["complete"]) is True
+        assert set(exc) == {"fch", "xch", "mbxas"}
+        assert set(exc["mbxas"]) == {"energies", "absorption", "mb_overlap",
+                                     "dipole_KS", "basis_ovlp"}
+        assert h5.read_text(exc["fch"], "output").startswith("")
+        assert h5.read_json(f, "parameters")["xc"] == "lda"
+        assert h5.read_structure(f, "structure") == tiny_calc.structure
+
+    mol_chk, scf_chk = pyscf_chkfile.load_scf(path)
+    assert mol_chk.natm == 3
+    assert np.array_equal(scf_chk["mo_coeff"], np.asarray(tiny_calc.gs_data.mo_coeff))
+
+
+def test_save_object_is_append_only(tiny_calc, tmp_path):
+    path = tiny_calc.save_object(oname="append.h5", save_path=str(tmp_path))
+
+    with h5py.File(path, "r+") as f:
+        f["excitations/000"].attrs["sentinel"] = 42
+
+    tiny_calc.save_object(oname="append.h5", save_path=str(tmp_path))
+
+    with h5py.File(path, "r") as f:
+        assert int(f["excitations/000"].attrs["sentinel"]) == 42
+
+
+def test_save_object_rewrites_incomplete_groups(tiny_calc, tmp_path):
+    path = tiny_calc.save_object(oname="partial.h5", save_path=str(tmp_path))
+
+    with h5py.File(path, "r+") as f:
+        del f["excitations/000"].attrs["complete"]
+        f["excitations/000"].attrs["sentinel"] = 42
+
+    tiny_calc.save_object(oname="partial.h5", save_path=str(tmp_path))
+
+    with h5py.File(path, "r") as f:
+        assert "sentinel" not in f["excitations/000"].attrs
+        assert bool(f["excitations/000"].attrs["complete"]) is True
+
+
+def test_save_object_normalizes_the_extension(tiny_calc, tmp_path):
+    path = tiny_calc.save_object(oname="named.pkl", save_path=str(tmp_path))
+    assert path == str(tmp_path / "named.h5")
+
+
+def test_save_object_requires_a_ground_state(tmp_path):
+    from pymbxas.calculators.pyscf import PySCF_mbxas
+
+    obj = PySCF_mbxas(
+        structure=ase.build.molecule("H2O"), basis="sto-3g",
+        xas_verbose=1, dft_verbose=0, dft_output=False, save=False,
+        target_dir=str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="ground state"):
+        obj.save_object()
