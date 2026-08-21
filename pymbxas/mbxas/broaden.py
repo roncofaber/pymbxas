@@ -10,10 +10,8 @@ import numpy as np
 
 #%%
 
-#TODO check
 def gaussian_broadening(x, sigma):
-    # return np.exp(-x**2 / (2 * sigma**2)) / (sigma * np.sqrt(2 * np.pi))
-    return np.exp(-0.5*(x/sigma)**2)
+    return np.exp(-0.5*(x/sigma)**2) / (sigma * np.sqrt(2 * np.pi))
 
 def broadened_spectrum(egrid, energies, intensities, sigma):
     x_shifted = egrid[:, np.newaxis] - energies  # (npoints, M)
