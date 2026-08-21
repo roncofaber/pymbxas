@@ -63,16 +63,18 @@ class Spectra():
         data    = excitation.data["fch"]
         mbxas   = excitation.mbxas
         channel = excitation.channel
-        
+
         # store XAS data
         self._gs_energy = pyscf_obj.gs_data.e_tot
         self._energies  = mbxas["energies"]
         self._amplitude = mbxas["absorption"]
-        
-        # store MO data
-        self._mo_coeff = data.mo_coeff[channel]
-        self._mo_occ   = data.mo_occ[channel]
-        
+
+        # store MO data for both spin channels from the FCH wavefunction.
+        # _channel identifies which spin was excited.
+        self._mo_coeff = data.mo_coeff   # shape: (2, nbasis, norb)
+        self._mo_occ   = data.mo_occ     # shape: (2, norb)
+        self._channel  = channel
+
         # metadata for clustering and such
         self._el_labels = np.array([-1]*self.CMO.shape[1])
         self._label     = -1
@@ -109,12 +111,18 @@ class Spectra():
                     change_key(data, old_key, new_key)
 
             # Handle missing keys gracefully
-            for key in ["_exc_idx", "_el_labels"]:
+            for key in ["_exc_idx", "_el_labels", "_channel"]:
                 if key not in data:
                     data[key] = None
 
+            if data["_channel"] is None:
+                data["_channel"] = 1  # historical default was always beta
+
             if data["_el_labels"] is None:
-                data["_el_labels"] = np.array([-1] * len(np.where(data["_mo_occ"] == 0)[0][1:]))
+                mo_occ = data["_mo_occ"]
+                if np.asarray(mo_occ).ndim == 2:
+                    mo_occ = mo_occ[data["_channel"]]
+                data["_el_labels"] = np.array([-1] * len(np.where(mo_occ == 0)[0][1:]))
 
             # assign data and make mol object
             self.__dict__ = data
@@ -134,9 +142,9 @@ class Spectra():
         # can we use the sea urchin here?
         try:
             import sea_urchin.alignement.align as ali
-        except:
+        except ImportError:
             raise ImportError("You need SeaUrchin compiled for this to work.")
-        
+
         # get alignments to mean structure
         rot, tr, perm, inv, dh = ali.get_RTPI(self.structure, structure, alignment)
         
@@ -176,8 +184,12 @@ class Spectra():
         # calculate inversion contribution
         inv_A = inv**get_l_val(mol)
         
-        # calculate rotated MOs
-        ali_MOs = (inv_A*U).T.dot(self._mo_coeff[AO_permutation])
+        # calculate rotated MOs — handle both old (2D) and new (3D) formats
+        if np.asarray(self._mo_coeff).ndim == 3:
+            ali_MOs = np.array([(inv_A*U).T.dot(self._mo_coeff[ch][AO_permutation])
+                                for ch in range(self._mo_coeff.shape[0])])
+        else:
+            ali_MOs = (inv_A*U).T.dot(self._mo_coeff[AO_permutation])
         
         # reassign variables
         self.structure = structure
@@ -196,9 +208,9 @@ class Spectra():
         # can we use the sea urchin here?
         try:
             import sea_urchin.alignement.align as ali
-        except:
+        except ImportError:
             raise ImportError("You need SeaUrchin compiled for this to work.")
-        
+
         if subset is None:
             structure = self.structure
         else:
@@ -235,14 +247,14 @@ class Spectra():
     
     # generate iaos given a structure and a basis (assumes FCH)
     def make_iaos(self, minao="minao"):
-        
-        maxidx = np.where(self._mo_occ == 1)[0].max()
-        
+
+        maxidx = np.where(self._active_mo_occ == 1)[0].max()
+
         b_ovlp = self.mol.intor_symmetric('int1e_ovlp')
-        
-        iaos = iao.iao(self.mol, self._mo_coeff[:,:maxidx], minao=minao)
-        
-        return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T,b_ovlp,iaos))))
+
+        iaos = iao.iao(self.mol, self._active_mo_coeff[:, :maxidx], minao=minao)
+
+        return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T, b_ovlp, iaos))))
     
     def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
                           erange=None, el_label=None):
@@ -272,16 +284,31 @@ class Spectra():
         return np.einsum("ij,jk->ikj", self.amplitude, self.amplitude.T)
     
     def amp2int(self, amplitude=None):
-        if amplitude is not None:
-            return np.linalg.norm(amplitude, axis=0)
-        else:
-            return np.linalg.norm(self.amplitude, axis=0)
+        if amplitude is None:
+            amplitude = self.amplitude
+        return np.sum(amplitude**2, axis=0) / amplitude.shape[0]
     
+    # channel-aware accessors — handle both old (1D occ / 2D coeff)
+    # and new (2D occ / 3D coeff) formats transparently
+    @property
+    def _active_mo_occ(self):
+        mo_occ = self._mo_occ
+        return mo_occ[self._channel] if np.asarray(mo_occ).ndim == 2 else mo_occ
+
+    @property
+    def _active_mo_coeff(self):
+        mo_coeff = self._mo_coeff
+        return mo_coeff[self._channel] if np.asarray(mo_coeff).ndim == 3 else mo_coeff
+
     # get CMOs
     @property
-    def CMO(self): 
-        uno_idxs = np.where(self._mo_occ == 0)[0][1:]
-        return self._mo_coeff[:, uno_idxs]
+    def CMO(self):
+        uno_idxs = np.where(self._active_mo_occ == 0)[0][1:]
+        return self._active_mo_coeff[:, uno_idxs]
+
+    @property
+    def channel(self):
+        return self._channel
     
     @property
     def label(self):

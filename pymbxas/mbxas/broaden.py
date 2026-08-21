@@ -16,9 +16,14 @@ def gaussian_broadening(x, sigma):
     return np.exp(-0.5*(x/sigma)**2)
 
 def broadened_spectrum(egrid, energies, intensities, sigma):
-    x_shifted = egrid[:, np.newaxis] - energies  # Efficiently subtract energies from each x value
-    broadened = intensities * gaussian_broadening(x_shifted, sigma)
-    return np.sum(broadened, axis=1)
+    x_shifted = egrid[:, np.newaxis] - energies  # (npoints, M)
+    gauss = gaussian_broadening(x_shifted, sigma)  # (npoints, M)
+    if intensities.ndim == 1:
+        # intensities: (M,) -> spectra: (npoints,)
+        return np.sum(intensities * gauss, axis=1)
+    else:
+        # intensities: (naxes, M) -> spectra: (naxes, npoints)
+        return np.sum(intensities[:, np.newaxis, :] * gauss[np.newaxis, :, :], axis=2)
 
 def get_mbxas_spectra(energies, intensities, sigma=0.5, npoints=3001, tol=0.01, erange=None):
     """
@@ -27,6 +32,7 @@ def get_mbxas_spectra(energies, intensities, sigma=0.5, npoints=3001, tol=0.01, 
     Parameters:
     energies (array): Array of energy values (eV).
     intensities (array): Array of intensity values corresponding to the energies.
+        Can be 1D (N,) or 2D (naxes, N).
     sigma (float): Standard deviation for Gaussian broadening (default is 0.5 eV).
     npoints (int): Number of points in the resulting spectra (default is 3001).
     tol (float): Tolerance for extending the energy range (default is 0.01).
@@ -35,9 +41,9 @@ def get_mbxas_spectra(energies, intensities, sigma=0.5, npoints=3001, tol=0.01, 
     Returns:
     tuple: Tuple containing:
         - energy (array): Array of energy values for the spectra.
-        - spectra (array): Array of broadened spectra values.
+        - spectra (array): Broadened spectra, shape (npoints,) or (naxes, npoints).
     """
-    
+
     # Determine the energy range for the spectra
     if erange is not None:
         if len(erange) == 2:
@@ -52,11 +58,18 @@ def get_mbxas_spectra(energies, intensities, sigma=0.5, npoints=3001, tol=0.01, 
         max_E = np.max(energies)
         dE = max_E - min_E
         egrid = np.linspace(min_E - tol * dE, max_E + tol * dE, npoints)
-    
+
     # Define relevant indexes for energies within the range
     rel_idxs = (energies > min_E - 5 * sigma) & (energies < max_E + 5 * sigma)
-    
+
+    # Index intensities along the transitions axis (last axis)
+    intensities = np.asarray(intensities)
+    if intensities.ndim == 1:
+        intensities_filtered = intensities[rel_idxs]
+    else:
+        intensities_filtered = intensities[:, rel_idxs]
+
     # Generate the broadened spectra
-    spectra = broadened_spectrum(egrid, energies[rel_idxs], intensities[rel_idxs], sigma)
-    
+    spectra = broadened_spectrum(egrid, energies[rel_idxs], intensities_filtered, sigma)
+
     return egrid, spectra

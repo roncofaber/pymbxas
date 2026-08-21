@@ -239,7 +239,7 @@ class PySCF_mbxas():
         
         # check if GS was already performed, if so: skip
         if self._ran_GS and not force:
-            self.logger.warn("GS already ran with this configuration. Skipping.")
+            self.logger.warning("GS already ran with this configuration. Skipping.")
             return
         self.logger.info("Started a new GS calculation")
         
@@ -341,43 +341,25 @@ class PySCF_mbxas():
     
 
     def _print_fchk_files(self):
-        
-    # write MOsmo_occ
+
+        # write MOs
         if self._used_loc:
-        
             write_data_to_fchk(self.mol,
-                              self.data,
+                               mo_coeff = self.gs_data.mo_coeff_del,
                                oname    = self._tdir + "/output_gs_del.fchk",
-                               mo_coeff = self.data.mo_coeff_del
                                )
-            
+
             write_data_to_fchk(self.mol,
-                               self.data,
+                               mo_coeff = self.gs_data.mo_coeff,
                                oname    = self._tdir + "/output_gs_loc.fchk",
-                               mo_coeff = self.data.mo_coeff
                                )
-        
+
         else:
             write_data_to_fchk(self.mol,
-                               self.data,
+                               mo_coeff = self.gs_data.mo_coeff,
                                oname    = self._tdir + "/output_gs.fchk",
-                               mo_coeff = self.data.mo_coeff
                                )
-        
-        # write LIVVOs
-        mo_vvo = np.zeros(self.data.mo_coeff.shape)
-        for channel in [0,1]:
-            
-            shape = self.data.mo_livvo.shape[1]
-            
-            mo_vvo[channel][:,:shape] = self.data.mo_livvo
-        
-        write_data_to_fchk(self.mol,
-                           self.data,
-                           oname    = self._tdir + "/livvos.fchk",
-                           mo_coeff = self.data.mo_livvo
-                           )
-            
+
         return
     
 
@@ -395,8 +377,8 @@ class PySCF_mbxas():
             intensities.append(exc.mbxas["absorption"])
             
         energies    = Ha*np.concatenate(energies)
-        intensities = np.concatenate(intensities, axis=1)
-        
+        intensities = np.concatenate(intensities, axis=1)**2  # |d|² per axis
+
         erange, spectras = get_mbxas_spectra(energies, intensities,
                                               sigma=sigma, npoints=npoints,
                                               tol=tol, erange=erange)

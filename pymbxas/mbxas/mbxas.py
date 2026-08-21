@@ -14,39 +14,47 @@ import numpy as np
 def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None):
 
     # Calculate dipole integrals and basis set overlap matrix
-    dipole = mol.intor('int1e_r')  # Dipole moment integrals
-    basis_overlap = mol.intor("int1e_ovlp")  # Basis function overlap matrix
+    dipole = mol.intor('int1e_r')  # shape: (3, nbasis, nbasis)
+    basis_overlap = mol.intor("int1e_ovlp")  # shape: (nbasis, nbasis)
 
-    # Calculate FCH dipole matrix 
-    dipole_KS = fch_calc.mo_coeff[channel].T @ dipole @ fch_calc.mo_coeff[channel]
+    # Calculate MB overlap and dipole matrices for both spin channels.
+    # Index 0 = alpha, index 1 = beta.
+    # The non-excited channel captures spin reorganization in the core-hole
+    # field and is needed for future cross-spin effect calculations.
+    mb_overlap = np.array([
+        fch_calc.mo_coeff[ch].T @ basis_overlap @ gs_calc.mo_coeff[ch]
+        for ch in range(2)
+    ])  # shape: (2, norb_fch, norb_gs)
 
-    # Calculate many-body overlap matrix
-    mb_overlap = fch_calc.mo_coeff[channel].T @ basis_overlap @ gs_calc.mo_coeff[channel]
+    dipole_KS = np.array([
+        fch_calc.mo_coeff[ch].T @ dipole @ fch_calc.mo_coeff[ch]
+        for ch in range(2)
+    ])  # shape: (2, 3, norb, norb)
 
     # Index of the excited orbital in FCH calculation
-    exc_orb_idx = np.where(fch_calc.mo_occ[channel] == 0)[0][0] 
+    exc_orb_idx = np.where(fch_calc.mo_occ[channel] == 0)[0][0]
 
-    # Occupied and unoccupied orbital indices for GS and FCH
+    # Occupied and unoccupied orbital indices for GS and FCH (excited channel)
     occ_idxs_fch = np.where(fch_calc.mo_occ[channel] == 1)[0]
-    occ_idxs_gs = np.delete(np.where(gs_calc.mo_occ[channel] == 1)[0], gs_orb_idx)
-    uno_idxs_fch = np.where(fch_calc.mo_occ[channel] == 0)[0][1:] 
+    occ_idxs_gs  = np.delete(np.where(gs_calc.mo_occ[channel] == 1)[0], gs_orb_idx)
+    uno_idxs_fch = np.where(fch_calc.mo_occ[channel] == 0)[0][1:]
 
-    # Extract occupied block of the MB matrix
-    AMat = mb_overlap[np.ix_(occ_idxs_fch, occ_idxs_gs)] 
+    # Extract occupied block of the MB matrix (excited channel)
+    AMat = mb_overlap[channel][np.ix_(occ_idxs_fch, occ_idxs_gs)]
 
     # Determinant of AMat
     ADet = np.linalg.det(AMat)
 
-    # Extract unoccupied block of the MB matrix
-    APrimeMat = mb_overlap[np.ix_(uno_idxs_fch, occ_idxs_gs)]
+    # Extract unoccupied block of the MB matrix (excited channel)
+    APrimeMat = mb_overlap[channel][np.ix_(uno_idxs_fch, occ_idxs_gs)]
 
-    # Calculate KMat 
+    # Calculate KMat
     KMat = APrimeMat @ np.linalg.inv(AMat)
 
-    # Transition dipole moments from excited orbital
-    chb_xmat = dipole_KS[:, :, exc_orb_idx]
-    chb_xmat_occ = chb_xmat[:,occ_idxs_fch]
-    chb_xmat_uno = chb_xmat[:,uno_idxs_fch]
+    # Transition dipole moments from excited orbital (excited channel)
+    chb_xmat     = dipole_KS[channel][:, :, exc_orb_idx]
+    chb_xmat_occ = chb_xmat[:, occ_idxs_fch]
+    chb_xmat_uno = chb_xmat[:, uno_idxs_fch]
 
     # Calculate absorption spectrum
     absorption = ADet*(chb_xmat_uno - (KMat @ chb_xmat_occ.T).T)
@@ -58,8 +66,8 @@ def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None
     if xch_calc is not None:
         energies += xch_calc.e_tot - gs_calc.e_tot - np.min(energies)
 
-    # Return results 
-    return energies, absorption, mb_overlap, dipole_KS, basis_overlap 
+    # Return results
+    return energies, absorption, mb_overlap, dipole_KS, basis_overlap
 
 # # Function to run MBXAS of pyscf calculators
 # def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None):
