@@ -248,11 +248,11 @@ class Spectra():
     # generate iaos given a structure and a basis (assumes FCH)
     def make_iaos(self, minao="minao"):
 
-        maxidx = np.where(self._active_mo_occ == 1)[0].max()
+        occ_idxs = np.where(self._active_mo_occ == 1)[0]
 
         b_ovlp = self.mol.intor_symmetric('int1e_ovlp')
 
-        iaos = iao.iao(self.mol, self._active_mo_coeff[:, :maxidx], minao=minao)
+        iaos = iao.iao(self.mol, self._active_mo_coeff[:, occ_idxs], minao=minao)
 
         return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T, b_ovlp, iaos))))
     
@@ -272,7 +272,10 @@ class Spectra():
             erange = [self.energies.min(), self.energies.max()]
             
         # convert amplitude to intensity
-        intensities = self.amp2int(amplitude)
+        if axis is None:
+            intensities = self.amp2int(amplitude)
+        else:
+            intensities = amplitude[axis]**2
         
         erange, spectra = get_mbxas_spectra(energies, intensities,
                                               sigma=sigma, npoints=npoints,
