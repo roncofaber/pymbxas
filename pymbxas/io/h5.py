@@ -141,3 +141,44 @@ def append(path):
 
 def open_plain(path, mode="r"):
     return h5py.File(path, mode)
+
+
+def write_snapshot(group, data):
+    data = data.to_cpu()
+
+    write_str(group, "mol", data.mol.dumps())
+
+    scf = group.create_group("scf")
+    scf.create_dataset("e_tot", data=float(data.e_tot))
+    write_array(scf, "nelec", np.asarray(data.nelec, dtype=np.int64))
+    for name in ("mo_coeff", "mo_occ", "mo_energy"):
+        write_array(scf, name, np.asarray(getattr(data, name)))
+
+    mo_coeff_del = getattr(data, "mo_coeff_del", None)
+    if mo_coeff_del is not None:
+        write_array(scf, "mo_coeff_del", np.asarray(mo_coeff_del))
+    return
+
+
+def read_snapshot(path, key, lazy=False):
+    from pyscf import gto
+    from pymbxas.io.data import pyscf_data
+
+    with h5py.File(path, "r") as f:
+        group = f[key]
+        mol   = gto.loads(read_str(group, "mol"))
+        scf   = group["scf"]
+        e_tot = float(scf["e_tot"][()])
+        nelec = tuple(int(x) for x in scf["nelec"][()])
+
+        if lazy:
+            mol.verbose = 0
+            return pyscf_data.from_h5_source(mol, e_tot, nelec, str(path), key)
+
+        arrays = {name: scf[name][()] for name in
+                  ("mo_coeff", "mo_occ", "mo_energy") if name in scf}
+        if "mo_coeff_del" in scf:
+            arrays["mo_coeff_del"] = scf["mo_coeff_del"][()]
+
+    mol.verbose = 0
+    return pyscf_data.from_arrays(mol, e_tot, nelec, **arrays)

@@ -154,3 +154,74 @@ def test_pyscf_data_lazy_defers_array_read(tmp_path):
 
     data.materialize()
     assert "mo_energy" in vars(data)
+
+
+def _tiny_uks():
+    from pyscf import gto, scf
+    mol = gto.M(atom="O 0 0 0; H 0 0 0.96; H 0.93 0 -0.24",
+                basis="sto-3g", spin=0, verbose=0)
+    mf = scf.UKS(mol)
+    mf.xc = "lda"
+    mf.kernel()
+    return mf
+
+
+def test_snapshot_roundtrip_at_root_is_chkfile_readable(tmp_path):
+    from pyscf.scf import chkfile as pyscf_chkfile
+    from pymbxas.io.data import pyscf_data
+
+    mf = _tiny_uks()
+    data = pyscf_data(mf)
+
+    path = tmp_path / "snap.h5"
+    with h5py.File(path, "w") as f:
+        h5.stamp(f, h5.KIND_CALCULATION)
+        h5.write_snapshot(f, data)
+
+    back = h5.read_snapshot(str(path), "/")
+    assert np.array_equal(back.mo_coeff, np.asarray(mf.mo_coeff))
+    assert np.array_equal(back.mo_occ, np.asarray(mf.mo_occ))
+    assert np.array_equal(back.mo_energy, np.asarray(mf.mo_energy))
+    assert back.e_tot == mf.e_tot
+    assert back.nelec == tuple(mf.nelec)
+    assert back.mol.natm == mf.mol.natm
+    assert np.allclose(back.mol.atom_coords(), mf.mol.atom_coords())
+
+    mol_chk, scf_chk = pyscf_chkfile.load_scf(str(path))
+    assert mol_chk.natm == 3
+    assert np.array_equal(scf_chk["mo_coeff"], np.asarray(mf.mo_coeff))
+
+
+def test_snapshot_roundtrip_in_nested_group_and_lazy(tmp_path):
+    from pymbxas.io.data import pyscf_data
+
+    mf = _tiny_uks()
+    data = pyscf_data(mf)
+    data.mo_coeff_del = np.asarray(mf.mo_coeff) * 2.0
+
+    path = tmp_path / "nested.h5"
+    with h5py.File(path, "w") as f:
+        h5.stamp(f, h5.KIND_CALCULATION)
+        h5.write_snapshot(f.create_group("excitations/000/fch"), data)
+
+    eager = h5.read_snapshot(str(path), "excitations/000/fch")
+    assert np.array_equal(eager.mo_coeff_del, np.asarray(mf.mo_coeff) * 2.0)
+
+    lazy = h5.read_snapshot(str(path), "excitations/000/fch", lazy=True)
+    assert "mo_coeff" not in vars(lazy)
+    assert lazy.e_tot == mf.e_tot
+    assert np.array_equal(lazy.mo_coeff, np.asarray(mf.mo_coeff))
+
+
+def test_snapshot_without_mo_coeff_del_reports_absent(tmp_path):
+    from pymbxas.io.data import pyscf_data
+
+    mf = _tiny_uks()
+    path = tmp_path / "nodel.h5"
+    with h5py.File(path, "w") as f:
+        h5.stamp(f, h5.KIND_CALCULATION)
+        h5.write_snapshot(f, pyscf_data(mf))
+
+    for lazy in (False, True):
+        back = h5.read_snapshot(str(path), "/", lazy=lazy)
+        assert getattr(back, "mo_coeff_del", None) is None
