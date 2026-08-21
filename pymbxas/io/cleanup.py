@@ -12,11 +12,15 @@ import glob
 #%%
 
 def remove_tmp_files(current_directory):
-    
-    file_list = glob.glob(current_directory + "/tmp*")
-    
+
+    file_list = glob.glob(os.path.join(current_directory, "tmp*.h5"))
+    file_list.extend(glob.glob(os.path.join(current_directory, "tmp*.chk")))
+
     for file in file_list:
         if os.path.isfile(file):
-            os.remove(file)
-            
+            try:
+                os.remove(file)
+            except OSError:
+                pass
+
     return
