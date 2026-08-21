@@ -195,9 +195,9 @@ class Spectras():
         # can we use the sea urchin here?
         try:
             import sea_urchin.alignement.align as ali
-        except:
+        except ImportError:
             raise ImportError("You need SeaUrchin compiled for this to work.")
-        
+
         # get structures
         structures = [sp.structure for sp in self]
         
@@ -215,9 +215,9 @@ class Spectras():
         # can we use the sea urchin here?
         try:
             import sea_urchin.alignement.align as ali
-        except:
+        except ImportError:
             raise ImportError("You need SeaUrchin compiled for this to work.")
-        
+
         # get spectras and structures
         spectras   = self.__get_atomic_label(label)
         structures = [sp.structure for sp in spectras]

@@ -51,7 +51,7 @@ def generate_scaler(scaler):
         return prep.StandardScaler(with_std=False)
     
     else:
-        raise "{} is not a properly implemented method".format(scaler)
+        raise ValueError("{} is not a properly implemented method".format(scaler))
     
     return
 

@@ -91,7 +91,7 @@ def rotate_structure(structure, rot, tr, perm, inv, rtype):
     try:
         import sea_urchin.alignement.align as ali
         has_SU = True
-    except:
+    except ImportError:
         has_SU = False
     assert has_SU, "Please install Sea Urchin to use this"
     return ali.align_structure(structure, rot, tr, perm, inv, rtype)

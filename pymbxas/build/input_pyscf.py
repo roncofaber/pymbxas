@@ -22,7 +22,7 @@ def make_density_fitter(mol, pbc, cderi=False):
         if cderi is not None:
             df_obj._cderi_to_save = 'saved_cderi.h5'
     else:
-        raise "Density fitting for non PBC systems has yet to be implemented!"
+        raise NotImplementedError("Density fitting for non PBC systems has yet to be implemented!")
     
     df_obj.build()
     
@@ -30,7 +30,8 @@ def make_density_fitter(mol, pbc, cderi=False):
 
 # Function to make a pyscf calculator that both work with PBC and not.
 def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None,
-                          dens_fit=None, calc_name=None, save=False, gpu=False):
+                          dens_fit=None, calc_name=None, save=False, is_gpu=False,
+                          **kwargs):
     
     # with PBC
     if pbc:
@@ -63,7 +64,7 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
        calc.chkfile = '{}.chkfile'.format(calc_name)
     
     # add GPU compatibility
-    if gpu:
+    if is_gpu:
         try:
             calc = calc.to_gpu()
         except ImportError:

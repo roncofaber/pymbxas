@@ -68,7 +68,7 @@ class Geometry_optimizer():
         elif self.opt_type == "berny":
             from pyscf.geomopt.berny_solver import optimize
         else:
-            raise "WRONG 'opt_type' selected. 'geometric' and 'berny' accepted."
+            raise ValueError("WRONG 'opt_type' selected. 'geometric' and 'berny' accepted.")
         
         return optimize
     
