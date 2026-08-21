@@ -120,6 +120,15 @@ def open_read(path, expected_kind):
     return f
 
 
+def read_lazy_field(source, name):
+    path, key = source
+    with h5py.File(path, "r") as f:
+        scf = f[key]["scf"]
+        if name not in scf:
+            raise AttributeError(name)
+        return scf[name][()]
+
+
 def create(path, kind):
     f = h5py.File(path, "w")
     stamp(f, kind)

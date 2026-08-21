@@ -111,3 +111,46 @@ def test_create_stamps_the_file(tmp_path):
         assert h5.read_attr_str(f, "pymbxas_version") == pymbxas.__version__
         assert h5.read_str(f, "x") == "y"
         assert h5.read_str(f, "z") == "w"
+
+
+def test_pyscf_data_from_arrays_and_fields():
+    from pyscf import gto
+    from pymbxas.io.data import pyscf_data
+
+    mol = gto.M(atom="He 0 0 0", basis="sto-3g", verbose=0)
+    data = pyscf_data.from_arrays(
+        mol, e_tot=-2.8, nelec=(1, 1),
+        mo_coeff=np.eye(2), mo_occ=np.ones((2, 2)), mo_energy=np.zeros((2, 2)))
+
+    assert data.e_tot == -2.8
+    assert data.nelec == (1, 1)
+    assert np.array_equal(data.mo_coeff, np.eye(2))
+    assert getattr(data, "mo_coeff_del", None) is None
+    assert "mo_coeff" in pyscf_data._FIELDS
+    assert data.to_cpu().e_tot == -2.8
+
+
+def test_pyscf_data_lazy_defers_array_read(tmp_path):
+    import h5py as _h5py
+    from pyscf import gto
+    from pymbxas.io.data import pyscf_data
+
+    mol = gto.M(atom="He 0 0 0", basis="sto-3g", verbose=0)
+    coeff = np.arange(4, dtype=np.float64).reshape(2, 2)
+
+    path = tmp_path / "lazy.h5"
+    with _h5py.File(path, "w") as f:
+        scf = f.create_group("snap/scf")
+        h5.write_array(scf, "mo_coeff", coeff)
+        h5.write_array(scf, "mo_occ", np.ones((2, 2)))
+        h5.write_array(scf, "mo_energy", np.zeros((2, 2)))
+
+    data = pyscf_data.from_h5_source(mol, -2.8, (1, 1), str(path), "snap")
+
+    assert "mo_coeff" not in vars(data)
+    assert np.array_equal(data.mo_coeff, coeff)
+    assert "mo_coeff" in vars(data)
+    assert getattr(data, "mo_coeff_del", None) is None
+
+    data.materialize()
+    assert "mo_energy" in vars(data)
