@@ -121,7 +121,7 @@ Anything that needs a real calculator has to rebuild one with `make_pyscf_calcul
 
 The post-processing layer, deliberately decoupled from the calculators. `Spectra` carries the FCH MOs, the amplitudes and the structure, and rebuilds `mol` from the structure on load. It never re-runs SCF.
 
-`_mo_coeff` is `(2, nao, nmo)` and `_mo_occ` is `(2, nmo)`, with `_channel` selecting the excited one through the `_active_mo_coeff` / `_active_mo_occ` properties. Older files stored only the excited channel, so those properties fall back to 2D/1D input; keep that fallback.
+`_mo_coeff` is `(2, nao, nmo)` and `_mo_occ` is `(2, nmo)`, with `_channel` selecting the excited one through the `_active_mo_coeff` / `_active_mo_occ` properties. Both are always stored with the spin axis present, so those properties index it unconditionally.
 
 `CMO` is the virtual manifold with the core hole dropped, matching the transition list one-to-one. `_el_labels` labels those virtuals for clustering and must stay the same length.
 

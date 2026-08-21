@@ -211,12 +211,8 @@ class Spectra():
         # calculate inversion contribution
         inv_A = inv**get_l_val(mol)
         
-        # calculate rotated MOs - handle both old (2D) and new (3D) formats
-        if np.asarray(self._mo_coeff).ndim == 3:
-            ali_MOs = np.array([(inv_A*U).T.dot(self._mo_coeff[ch][AO_permutation])
-                                for ch in range(self._mo_coeff.shape[0])])
-        else:
-            ali_MOs = (inv_A*U).T.dot(self._mo_coeff[AO_permutation])
+        ali_MOs = np.array([(inv_A*U).T.dot(self._mo_coeff[ch][AO_permutation])
+                            for ch in range(self._mo_coeff.shape[0])])
         
         # reassign variables
         self.structure = structure
@@ -318,17 +314,13 @@ class Spectra():
             amplitude = self.amplitude
         return np.sum(amplitude**2, axis=0) / amplitude.shape[0]
     
-    # channel-aware accessors - handle both old (1D occ / 2D coeff)
-    # and new (2D occ / 3D coeff) formats transparently
     @property
     def _active_mo_occ(self):
-        mo_occ = self._mo_occ
-        return mo_occ[self._channel] if np.asarray(mo_occ).ndim == 2 else mo_occ
+        return self._mo_occ[self._channel]
 
     @property
     def _active_mo_coeff(self):
-        mo_coeff = self._mo_coeff
-        return mo_coeff[self._channel] if np.asarray(mo_coeff).ndim == 3 else mo_coeff
+        return self._mo_coeff[self._channel]
 
     # get CMOs
     @property
