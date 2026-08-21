@@ -21,7 +21,7 @@ pymbxas/
     boys.py           do_localization_pyscf  (IBO / Boys)
     basis.py          get_AO_permutation, get_l_val
     indexing.py       atoms_to_indexes
-    auxiliary.py      as_list, change_key, get_available_memory
+    auxiliary.py      as_list, get_available_memory
     check_keywords.py check_pbc
     metrics.py        scalers and distance features, used only by explorer/
   io/
@@ -80,7 +80,7 @@ The ground state runs once. Each `Excitation` is independent given `gs_data`, so
 
 ### `PySCF_mbxas`
 
-Owns the ground state and the list of excitations. Two ways in: a structure plus parameters, or `pkl_file` to restore.
+Owns the ground state and the list of excitations. Two ways in: a structure plus parameters, or `.load()` to restore from a saved checkpoint.
 
 | Attribute | Meaning |
 |---|---|
