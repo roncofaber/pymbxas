@@ -9,6 +9,7 @@ Created on Fri Feb 21 15:50:13 2025
 # some libraries
 import sys
 import json
+import logging
 import argparse
 
 # ASE
@@ -22,6 +23,7 @@ from pymbxas.drivers.acquisitor import pyscf_acquire
 
 def main():
     """Main function for the pymbxas command-line interface."""
+    logger = logging.getLogger(__name__)
     parser = argparse.ArgumentParser(
         description="Run PySCF calculations and save spectra."
     )
@@ -30,8 +32,8 @@ def main():
                            "(e.g., structure.xyz)"
     )
     parser.add_argument(
-        "-o", "--output_file", default="spectrum.pkl",
-        help="Path to save the spectrum (default: spectrum.pkl)"
+        "-o", "--output_file", default="spectrum.h5",
+        help="Path to save the spectrum (default: spectrum.h5)"
     )
     parser.add_argument(
         "-e", "--to_excite", required=True,
@@ -48,9 +50,6 @@ def main():
     except json.JSONDecodeError as e:
         print(f"Error decoding JSON: {e}", file=sys.stderr)
         return 1  # Indicate an error
-    except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
-        return 1
 
     try:
         atoms = read(args.input_file)
@@ -69,6 +68,6 @@ def main():
         print(f"Error: File '{args.input_file}' not found.",
               file=sys.stderr)
         return 1
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}", file=sys.stderr)
+    except Exception:
+        logger.exception("An unexpected error occurred")
         return 1

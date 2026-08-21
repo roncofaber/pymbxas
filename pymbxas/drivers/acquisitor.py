@@ -6,6 +6,8 @@ Created on Fri Feb 21 15:50:13 2025
 @author: roncofaber
 """
 
+import logging
+
 #%%
 
 def pyscf_acquire(structure, to_excite, **kwargs):
@@ -24,12 +26,11 @@ def pyscf_acquire(structure, to_excite, **kwargs):
         "spin": 0,
         "basis": "def2-svpd",
         "xc": "b3lyp",
-        "pbc": False,
+        "pbc": None,
         "solvent": None,
         "calc_type": "UKS",
         "do_xch": True,
         "loc_type": "ibo",
-        "pkl_file": None,
         "target_dir": None,
         "xas_verbose": 3,
         "xas_logfile": "pymbxas.log",
@@ -39,13 +40,14 @@ def pyscf_acquire(structure, to_excite, **kwargs):
         "print_fchk": False,
         "save": False,
         "save_chk": False,
-        "save_name": "pyscf_obj.pkl",
+        "save_name": "pymbxas_obj.h5",
         "save_path": None,
-        "gpu": True,
+        "gpu": False,
     }
-    
+
+    logger = logging.getLogger(__name__)
     from pymbxas.calculators.pyscf import PySCF_mbxas
-    
+
     params = defaults.copy()
     params.update(kwargs) # Update defaults with user-provided kwargs
 
@@ -54,5 +56,5 @@ def pyscf_acquire(structure, to_excite, **kwargs):
         obj.kernel(to_excite)
         return obj.to_spectra()
     except Exception as e:
-        print(f"Error during PySCF calculation: {e}")
+        logger.exception("Error during PySCF calculation")
         return None

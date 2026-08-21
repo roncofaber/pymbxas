@@ -18,7 +18,7 @@ import numpy as np
 import pymbxas
 from pymbxas.calculators.excitation import Excitation
 import pymbxas.utils.check_keywords as check
-from pymbxas.utils.auxiliary import as_list, change_key
+from pymbxas.utils.auxiliary import as_list
 from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.data import pyscf_data
 from pymbxas.io.config import configure_logger

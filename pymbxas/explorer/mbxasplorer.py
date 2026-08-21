@@ -398,9 +398,3 @@ class MBXASplorer(object):
         if not len(idx) == 1: raise ValueError
         
         return self[idx[0]]
-
-    def _save_self(self, oname):
-        
-        import dill
-        with open(oname, "wb") as fout:
-            dill.dump(self, fout)

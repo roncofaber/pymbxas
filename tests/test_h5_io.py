@@ -528,3 +528,19 @@ def test_pkl_file_keyword_is_gone():
     from pymbxas.calculators.pyscf import PySCF_mbxas
 
     assert "pkl_file" not in inspect.signature(PySCF_mbxas.__init__).parameters
+
+
+def test_dill_is_gone_from_the_package():
+    import pathlib
+    import pymbxas
+
+    root = pathlib.Path(pymbxas.__file__).parent
+    offenders = [str(p) for p in root.rglob("*.py")
+                 if "dill" in p.read_text()]
+    assert offenders == [], f"dill still referenced in: {offenders}"
+
+
+def test_change_key_is_gone():
+    from pymbxas.utils import auxiliary
+
+    assert not hasattr(auxiliary, "change_key")

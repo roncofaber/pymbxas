@@ -49,7 +49,7 @@ obj = PySCF_mbxas(
     
     save         = True,  # save object as pkl file
     save_chk     = False, # save calculation as chkfile
-    save_name    = "pyscf_obj.pkl", # name of saved file
+    save_name    = "pymbxas_obj.h5", # name of saved file
     save_path    = None, # path of saved object
     gpu          = False,
     )
