@@ -12,8 +12,8 @@ import numpy as np
 
 #%%
 
-# function that finds the permutation needed to go from Qchem internal order
-# to format of fchk files (IQmol compatible)
+# function that finds the permutation needed to reorder shells
+# to fchk file format (IQmol compatible)
 def calculate_shell_reordering(shell, start_idx):
 
     index_list = []

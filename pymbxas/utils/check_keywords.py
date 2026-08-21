@@ -18,7 +18,7 @@ def_exc_dict = {
     "inject"  : False,
     }
 
-# Function to transform an occ. dict to input ready for QCHEM
+# Function to transform an occ. dict to an occupation string
 def determine_occupation(occupation):
 
     if isinstance(occupation, str):
