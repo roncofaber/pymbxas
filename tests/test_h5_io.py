@@ -314,3 +314,32 @@ def test_spectra_constructor_rejects_a_path(tmp_path):
 
     with pytest.raises(TypeError, match="Spectra.load"):
         Spectra(str(tmp_path / "whatever.h5"))
+
+
+def test_spectras_roundtrip(tmp_path):
+    from pymbxas.spectras import Spectras
+
+    first  = _hand_built_spectra()
+    second = _hand_built_spectra()
+    second._energies = second._energies + 1.0
+
+    coll = Spectras([first, second], labels=[4, 9])
+    path = tmp_path / "coll.h5"
+    coll.save(str(path))
+
+    back = Spectras.load(str(path))
+
+    assert len(back) == 2
+    assert back.labels == [4, 9]
+    assert back[0].label == 4
+    assert back[1].label == 9
+    assert np.array_equal(back[1]._energies, second._energies)
+    assert np.array_equal(back[0]._mo_coeff, first._mo_coeff)
+    assert np.allclose(back._erange, coll._erange)
+
+
+def test_spectras_constructor_rejects_a_path(tmp_path):
+    from pymbxas.spectras import Spectras
+
+    with pytest.raises(TypeError, match="Spectras.load"):
+        Spectras(str(tmp_path / "whatever.h5"))

@@ -8,9 +8,9 @@ Created on Wed Jul  5 12:08:17 2023
 
 import numpy as np
 import copy
-import dill
 
 from pymbxas import Spectra
+from pymbxas.io import h5
 
 #%%
 
@@ -31,12 +31,11 @@ class Spectras():
         
         if isinstance(spectra_list, Spectra):
             spectra_list = [spectra_list]
-        
-        if isinstance(spectra_list, list):
-            self.__initialize_collection(spectra_list, labels, post_align,
-                                     alignment)
-        else:
-            self.__restart(spectra_list)
+
+        if not isinstance(spectra_list, list):
+            raise TypeError("Spectras() takes a list of Spectra; use Spectras.load(path) for files.")
+
+        self.__initialize_collection(spectra_list, labels, post_align, alignment)
         
         # store internal variables for later
         self._update_erange()
@@ -60,27 +59,24 @@ class Spectras():
             
         return
     
-    # restart from pkl file or another spectras object
-    def __restart(self, spectra_obj):
-        
-        #load a pkl or dict
-        if isinstance(spectra_obj, dict):
-            self.__dict__ = spectra_obj.copy()
-        elif isinstance(spectra_obj, str):
-            self.__dict__ = self.__pkl_to_dict(spectra_obj)
-            
-        spectras = [Spectra(ii) for ii in self.spectras]
-        
-        self.spectras = spectras
-            
+    @classmethod
+    def load(cls, filename):
+        with h5.open_read(filename, h5.KIND_SPECTRAS) as f:
+            spectras = [Spectra._from_group(f["spectras"][key])
+                        for key in sorted(f["spectras"])]
+            labels = [int(x) for x in f["labels"][()]]
+            aligned = bool(f.attrs["aligned"])
+
+        obj = cls(spectras, labels=labels)
+        obj._aligned = aligned
+        return obj
+
+    def materialize(self):
+        """Force every member's deferred coefficients to be read from disk."""
+        for spectra in self.spectras:
+            spectra.materialize()
         return
-    
-    @staticmethod
-    def __pkl_to_dict(filename):
-        with open(filename, 'rb') as fin:
-            data = dill.load(fin)
-        return data
-    
+
     def assign_atomic_labels(self, labels):
         
         # check if labels are provided
@@ -307,31 +303,19 @@ class Spectras():
     def __add__(self, spectras):
         return Spectras(self.spectras + spectras.spectras)
     
-    def _prepare_for_save(self):
-        
-        data = self.__dict__.copy()
-        
-        spectras = [sp._prepare_for_save() for sp in self.spectras]
-        
-        data["spectras"] = spectras
-        
-        return data
-    
-    def save(self, filename="spectras.pkl"):
-        """Saves the object to a file."""
-        
-        data = self._prepare_for_save()
-      
-        # Save to file
-        with open(filename, 'wb') as fout:
-            dill.dump(data, fout)
-            
+    def save(self, filename="spectras.h5"):
+        """Saves the collection to an HDF5 file."""
+        with h5.create(filename, h5.KIND_SPECTRAS) as fout:
+            fout.attrs["aligned"] = bool(self._aligned)
+            h5.write_array(fout, "labels", np.asarray(self.labels, dtype=np.int64))
+            root = fout.create_group("spectras")
+            for cc, spectra in enumerate(self.spectras):
+                spectra._write_into(root.create_group("{:03d}".format(cc)))
         return
     
-    # use it to return a copy of the spectra collection object
     def copy(self):
-        data = self._prepare_for_save()
-        return Spectras(data)
+        self.materialize()
+        return copy.deepcopy(self)
     
     def append(self, spectra):
         """Appends a single Spectra object to the collection.
