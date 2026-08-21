@@ -47,8 +47,8 @@ Example script:
         verbose      = 3,     # level of verbose of pySCF output (4-5 is good)
         print_fchk   = False,  # print fchk files (requires MOKIT)
         print_output = False, # print output to console
-        save         = True,  # save object as pkl file
-        save_name    = "pyscf_obj.pkl", # name of saved file
+        save         = True,  # save object as an HDF5 file
+        save_name    = "pymbxas_obj.h5", # name of saved file
         save_path    = None, # path of saved object
         loc_type     = "ibo",
         gpu          = True # if you want to use the GPU code
@@ -73,8 +73,8 @@ if sys.version_info[0] == 2:
     raise ImportError('Please run with Python3. This is Python2.')
 
 # package info
-__version__ = '0.5.1'
-__date__ = "23 Jan. 2025"
+__version__ = '0.6.0'
+__date__ = "21 Aug. 2026"
 __author__ = "Fabrice Roncoroni"
 __all__ = ["spectra", "spectras"]
 

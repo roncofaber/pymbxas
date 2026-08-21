@@ -77,9 +77,9 @@ obj = PySCF_mbxas(
     
     print_fchk   = False, # print FCHK files as calculation goes
     
-    save         = True,  # save object as pkl file
+    save         = True,  # save object as an HDF5 file
     save_chk     = False, # save calculation as chkfile
-    save_name    = "pyscf_obj.pkl", # name of saved file
+    save_name    = "pymbxas_obj.h5", # name of saved file
     save_path    = None, # path of saved object
     gpu          = False,
     )
@@ -114,7 +114,7 @@ Output:
 [16:02:02] |(I) >>>>> MBXAS finished in 0.0 s [✓].
 [16:02:02] |(I) ----- Excitation successful! -----|
 
-[16:02:02] |(I) Saved everything as pyscf_obj.pkl
+[16:02:02] |(I) Saved everything as pymbxas_obj.h5
 [16:02:02] |(I) PyMBXAS finished successfully!
 ```
 
@@ -130,12 +130,14 @@ plt.plot(E,I)
 plt.show()
 ```
 
-Calculations can be stored as pkl files using the dill package. You can then simply reload a calculation doing:
+Calculations are stored as HDF5 files. You can reload one, and keep exciting further atoms without re-running the ground state, with:
 
 ```python
-obj = PySCF_mbxas(pkl_file="pyscf_obj.pkl")
-
+obj = PySCF_mbxas.load("pymbxas_obj.h5")
+obj.excite("N")
 ```
+
+The file follows PySCF's chkfile layout for the ground state, so `pyscf.scf.chkfile.load_scf` and `mf.from_chk` also work on it.
 
 ### References
 
