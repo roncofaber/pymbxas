@@ -337,3 +337,16 @@ def test_h2o_oxygen_kedge(tmp_path):
         "shakeup_order=1 should change the spectrum (H2O/O has nonzero order-1 shake-up mass)"
     assert np.trapezoid(I_sk, E_sk) == pytest.approx(np.trapezoid(I_none, E_none), rel=0.1), \
         "shake-up convolution should approximately conserve total integrated intensity within the plotted erange"
+
+    # PySCF_mbxas.get_mbxas_spectra must still agree with Spectra's own
+    # output after becoming a thin wrapper (extends the existing agreement
+    # check above to the shakeup_order path too)
+    E_pyscf_sk, I_pyscf_sk = obj.get_mbxas_spectra("O", erange=[520, 560], sigma=0.5, shakeup_order=1)
+    assert np.array_equal(E_pyscf_sk, E_sk) and np.allclose(I_pyscf_sk, I_sk, atol=1e-12), \
+        "PySCF_mbxas.get_mbxas_spectra(shakeup_order=1) disagrees with Spectra.get_mbxas_spectra"
+
+    # shakeup_order=None through PySCF_mbxas must still match the original
+    # pre-refactor baseline computed at the top of this test
+    E_pyscf_none, I_pyscf_none = obj.get_mbxas_spectra("O", erange=[520, 560], sigma=0.5)
+    assert np.array_equal(E_pyscf_none, E) and np.allclose(I_pyscf_none, I, atol=1e-12), \
+        "PySCF_mbxas.get_mbxas_spectra regression after wrapper refactor"

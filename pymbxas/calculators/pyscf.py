@@ -321,18 +321,21 @@ class PySCF_mbxas():
                                          check_deg=True)
             s1_orbitals.append(s1orb)
         
-        # only one s orb, no loc needed
-        if len(s1_orbitals[1]) <= 1:
+        # channel is chosen per excitation, not here, so localization must be
+        # decided for both spin channels: skip only if neither is delocalized
+        if all(len(s1orb) <= 1 for s1orb in s1_orbitals):
             return dft_calc.mo_coeff, False
-        
+
         # localize up to highest degenerate orbital #TEST
         if loc_type.endswith("m"):
-            s1_orbitals = [list(range(np.max(orb) + 1)) for orb in s1_orbitals]
-            
-        
+            s1_orbitals = [list(range(np.max(orb) + 1)) if orb else orb
+                          for orb in s1_orbitals]
+
+
         mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
-        
-        self.logger.info("{} localization : {}".format(loc_type.upper(), s1_orbitals[1]))
+
+        self.logger.info("{} localization : alpha {} | beta {}".format(
+            loc_type.upper(), s1_orbitals[0], s1_orbitals[1]))
         
         self._used_loc = True
         
@@ -368,31 +371,29 @@ class PySCF_mbxas():
     
 
     def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.5, npoints=3001, tol=0.01,
-                          erange=None):
-        
+                          erange=None, shakeup_order=None):
+
         ato_idxs = atoms_to_indexes(self.structure, ato_idx)
-        
-        energies    = []
-        intensities = []
-        for exc in self.excitations:
-            if exc.ato_idx not in ato_idxs:
-                continue
-            energies.append(exc.mbxas["energies"])
-            intensities.append(exc.mbxas["absorption"])
-            
-        energies    = Ha*np.concatenate(energies)
-        intensities = np.concatenate(intensities, axis=1)**2  # |d|² per axis
+        matched = [i for i, exc in enumerate(self.excitations) if exc.ato_idx in ato_idxs]
+        if not matched:
+            raise ValueError(f"No excitations found for atom index/label {ato_idx!r}")
 
-        erange, spectras = get_mbxas_spectra(energies, intensities,
-                                              sigma=sigma, npoints=npoints,
-                                              tol=tol, erange=erange)
+        spectras = [self.to_spectra(i) for i in matched]
 
-        if axis is None:
-            spectras = np.mean(spectras, axis=0)
-        else:
-            spectras = spectras[axis]
+        if erange is None:
+            all_energies = np.concatenate([sp.energies for sp in spectras])
+            erange = [all_energies.min(), all_energies.max()]
 
-        return erange, spectras
+        energy = None
+        intensity_sum = None
+        for sp in spectras:
+            energy, intensity = sp.get_mbxas_spectra(axis=axis, sigma=sigma,
+                                                      npoints=npoints, tol=tol,
+                                                      erange=erange,
+                                                      shakeup_order=shakeup_order)
+            intensity_sum = intensity if intensity_sum is None else intensity_sum + intensity
+
+        return energy, intensity_sum
 
     def save_object(self, oname=None, save_path=None):
         """
