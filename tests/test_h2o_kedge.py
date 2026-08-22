@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 import ase.build
 from ase import units
-from scipy.integrate import trapezoid
 from pymbxas.calculators.pyscf import PySCF_mbxas
 from pymbxas.build.structure import ase_to_mole
 
@@ -213,13 +212,13 @@ def test_h2o_oxygen_kedge(tmp_path):
     stick_de = np.array([2.0])
     stick_w = np.array([1.0])  # equal weight to the n=0 term, for an easy 50/50 check
     convolved_one = convolve_shakeup(egrid_probe, main_probe, stick_de, stick_w, sigma=0.5)
-    assert trapezoid(convolved_one, egrid_probe) == pytest.approx(
-        trapezoid(main_probe, egrid_probe), rel=0.05), \
+    assert np.trapezoid(convolved_one, egrid_probe) == pytest.approx(
+        np.trapezoid(main_probe, egrid_probe), rel=0.05), \
         "convolution should conserve total integrated intensity"
     # half the conserved intensity should now sit near delta_e=+2 rather
     # than at the original peak (equal-weight n=0 vs n=1 split)
-    mass_near_peak = trapezoid(convolved_one[(egrid_probe > -1) & (egrid_probe < 1)], egrid_probe[(egrid_probe > -1) & (egrid_probe < 1)])
-    mass_near_satellite = trapezoid(convolved_one[(egrid_probe > 1) & (egrid_probe < 3)], egrid_probe[(egrid_probe > 1) & (egrid_probe < 3)])
+    mass_near_peak = np.trapezoid(convolved_one[(egrid_probe > -1) & (egrid_probe < 1)], egrid_probe[(egrid_probe > -1) & (egrid_probe < 1)])
+    mass_near_satellite = np.trapezoid(convolved_one[(egrid_probe > 1) & (egrid_probe < 3)], egrid_probe[(egrid_probe > 1) & (egrid_probe < 3)])
     assert mass_near_satellite > 0.3 * mass_near_peak, \
         "equal-weight single shake-up stick should move a comparable amount of intensity to the satellite"
 
