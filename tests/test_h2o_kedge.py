@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import ase.build
 from ase import units
+from scipy.integrate import trapezoid
 from pymbxas.calculators.pyscf import PySCF_mbxas
 from pymbxas.build.structure import ase_to_mole
 
@@ -185,6 +186,42 @@ def test_h2o_oxygen_kedge(tmp_path):
         assert orders_auto == [1, 2]
     else:
         assert orders_auto == [1]
+
+    from pymbxas.mbxas.shakeup import broaden_shakeup, convolve_shakeup
+
+    # broaden_shakeup with empty sticks reduces to a single normalized
+    # Gaussian at delta_e=0 (the implicit n=0 "no extra shake-up" term)
+    egrid_probe = np.linspace(-5, 5, 2001)
+    kernel_empty = broaden_shakeup(np.empty(0), np.empty(0), egrid_probe, sigma=0.5)
+    de_probe = egrid_probe[1] - egrid_probe[0]
+    assert abs(kernel_empty.sum() * de_probe - 1.0) < 1e-6, \
+        f"empty-sticks shake-up kernel should integrate to 1, got {kernel_empty.sum()*de_probe:.6f}"
+    assert egrid_probe[np.argmax(kernel_empty)] == pytest.approx(0.0, abs=de_probe), \
+        "empty-sticks shake-up kernel should peak at delta_e=0"
+
+    # convolve_shakeup with empty sticks must leave the main spectrum
+    # unchanged (this is the shakeup_order=None-equivalent limit)
+    main_probe = np.exp(-0.5 * (egrid_probe / 1.0) ** 2)
+    convolved_empty = convolve_shakeup(egrid_probe, main_probe, np.empty(0), np.empty(0), sigma=0.5)
+    assert np.allclose(convolved_empty, main_probe, atol=1e-3), \
+        "convolving with an empty shake-up spectrum should not change the main spectrum"
+
+    # a single shake-up stick at a known offset should shift probability
+    # mass to (roughly) that offset, and total integrated intensity should
+    # be conserved (both terms sum to the original mass, up to the
+    # normalization convention: main-only weight 1 vs shake-up weight w)
+    stick_de = np.array([2.0])
+    stick_w = np.array([1.0])  # equal weight to the n=0 term, for an easy 50/50 check
+    convolved_one = convolve_shakeup(egrid_probe, main_probe, stick_de, stick_w, sigma=0.5)
+    assert trapezoid(convolved_one, egrid_probe) == pytest.approx(
+        trapezoid(main_probe, egrid_probe), rel=0.05), \
+        "convolution should conserve total integrated intensity"
+    # half the conserved intensity should now sit near delta_e=+2 rather
+    # than at the original peak (equal-weight n=0 vs n=1 split)
+    mass_near_peak = trapezoid(convolved_one[(egrid_probe > -1) & (egrid_probe < 1)], egrid_probe[(egrid_probe > -1) & (egrid_probe < 1)])
+    mass_near_satellite = trapezoid(convolved_one[(egrid_probe > 1) & (egrid_probe < 3)], egrid_probe[(egrid_probe > 1) & (egrid_probe < 3)])
+    assert mass_near_satellite > 0.3 * mass_near_peak, \
+        "equal-weight single shake-up stick should move a comparable amount of intensity to the satellite"
 
     h5_path = obj.save_object(oname="roundtrip.h5", save_path=str(tmp_path))
 

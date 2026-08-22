@@ -96,3 +96,52 @@ def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01):
         all_e.append(ek)
         all_w.append(wk)
     return np.concatenate(all_e), np.concatenate(all_w), list(range(1, order + 1))
+
+
+def broaden_shakeup(delta_e, weight, egrid, sigma):
+    """Broaden shake-up sticks onto egrid, including the implicit n=0
+    (no extra shake-up) term at delta_e=0 with unit weight -- this is what
+    makes the result usable directly as a convolution kernel."""
+    from pymbxas.mbxas.broaden import broadened_spectrum
+
+    all_e = np.concatenate([[0.0], delta_e])
+    all_w = np.concatenate([[1.0], weight])
+    return broadened_spectrum(egrid, all_e, all_w, sigma)
+
+
+def convolve_shakeup(egrid, main_intensity, delta_e, weight, sigma):
+    """Convolve a broadened main spectrum with the shake-up probability
+    kernel: an exact delta at delta_e=0 for the n=0 ("no extra shake-up")
+    term, plus the supplied (delta_e, weight) sticks Gaussian-broadened by
+    sigma. The n=0 term is deliberately NOT broadened here -- the main
+    spectrum this convolves against has already been broadened by sigma
+    once upstream, so re-broadening it here would double the effective
+    width of every peak that has no shake-up satellites.
+
+    egrid: (npoints,) uniform grid main_intensity is defined on.
+    main_intensity: (npoints,) or (naxes, npoints).
+    Returns an array the same shape as main_intensity, on the same egrid.
+    """
+    from pymbxas.mbxas.broaden import broadened_spectrum
+
+    de = egrid[1] - egrid[0]
+
+    stick_extent = np.abs(delta_e).max() if len(delta_e) else 0.0
+    half_width = stick_extent + 5 * sigma
+    n_half = int(np.ceil(half_width / de))
+    kgrid = np.arange(-n_half, n_half + 1) * de  # guaranteed symmetric, kgrid[n_half] == 0.0 exactly
+
+    kernel = np.zeros_like(kgrid)
+    kernel[n_half] = 1.0 / de  # exact delta at delta_e=0, unbroadened
+    if len(delta_e):
+        kernel = kernel + broadened_spectrum(kgrid, delta_e, weight, sigma)
+
+    kernel = kernel / (kernel.sum() * de)  # normalize to unit probability
+
+    def _convolve_1d(y):
+        return np.convolve(y, kernel, mode="same") * de
+
+    main_intensity = np.asarray(main_intensity)
+    if main_intensity.ndim == 1:
+        return _convolve_1d(main_intensity)
+    return np.array([_convolve_1d(row) for row in main_intensity])
