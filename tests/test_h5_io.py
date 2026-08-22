@@ -249,6 +249,10 @@ def _hand_built_spectra():
     sp._channel   = 1
     sp._el_labels = np.array([-1, -1, 2, 2])
     sp._label     = 7
+    sp._mb_overlap    = np.arange(2 * nao * nao, dtype=np.float64).reshape(2, nao, nao)
+    sp._fch_mo_energy = np.linspace(-20.0, 5.0, 2 * nao).reshape(2, nao)
+    sp._gs_mo_occ     = np.asarray(mf.mo_occ)
+    sp._core_orb_idx  = 0
     return sp
 
 
