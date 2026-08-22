@@ -9,7 +9,7 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Optional install extras for the machine learning and GPU paths, `pymbxas[ml]` and `pymbxas[gpu]`
 - Saved calculations can be reopened with `.load()` and continued without repeating the ground state
 - Saved calculations are readable by PySCF as chkfiles
-- `get_mbxas_spectra(shakeup_order=1|2|"auto")` convolves in order-k valence shake-up satellite intensity beyond the one-body truncation
+- `shakeup_order` on `get_mbxas_spectra` adds valence shake-up satellite intensity beyond the one-body truncation
 
 ### Changed
 - Spectral intensity now includes the photon-energy prefactor of the absorption cross section, so relative peak heights shift slightly across an edge
