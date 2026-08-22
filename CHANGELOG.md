@@ -9,8 +9,10 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Optional install extras for the machine learning and GPU paths, `pymbxas[ml]` and `pymbxas[gpu]`
 - Saved calculations can be reopened with `.load()` and continued without repeating the ground state
 - Saved calculations are readable by PySCF as chkfiles
+- `get_mbxas_spectra(shakeup_order=1|2|"auto")` convolves in order-k valence shake-up satellite intensity beyond the one-body truncation
 
 ### Changed
+- Spectral intensity now includes the photon-energy prefactor of the absorption cross section, so relative peak heights shift slightly across an edge
 - Broadened spectra are now area-normalized, so integrated intensity no longer depends on `sigma`
 - A structure's own periodicity now decides whether a calculation is treated as periodic
 - Periodic calculations now raise an error instead of returning unphysical intensities
@@ -25,6 +27,7 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Reloading a calculation no longer reads orbital coefficients until they are used
 
 ### Fixed
+- Ground-state localization is now decided from both spin channels, not just beta, so exciting the alpha channel no longer risks skipping needed localization
 - Fixed identification of the core orbital to excite when occupations are not aufbau
 - Fixed near-degenerate core orbitals being listed twice, which could break localization
 - Excitations with still-delocalized core orbitals are now skipped instead of left unusable
