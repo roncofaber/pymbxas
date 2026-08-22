@@ -342,7 +342,58 @@ class Spectra():
         if energies is None:
             energies = self._energies
         return energies * np.sum(amplitude**2, axis=0) / amplitude.shape[0]
-    
+
+    def _shakeup_sticks(self, order, channel, tol):
+        """Cached (delta_e_ev, weight, orders_included) for one spin channel.
+        `channel=None` defaults to the excited channel; an explicit channel
+        is accepted so a future cross-spin feature can call this on the
+        other channel without a signature change."""
+        from pymbxas.mbxas.mbxas import build_A_K
+        from pymbxas.mbxas.shakeup import shakeup_spectrum
+
+        if channel is None:
+            channel = self._channel
+
+        if not hasattr(self, "_shakeup_cache"):
+            self._shakeup_cache = {}
+
+        key = (channel, order, tol)
+        if key not in self._shakeup_cache:
+            occ_idxs_gs = np.setdiff1d(
+                np.where(self._gs_mo_occ[channel] == 1)[0], [self._core_orb_idx])
+            occ_idxs_fch = np.where(self._mo_occ[channel] == 1)[0]
+            uno_idxs_fch = np.where(self._mo_occ[channel] == 0)[0][1:]
+
+            _, _, K = build_A_K(self._mb_overlap[channel], occ_idxs_fch,
+                                occ_idxs_gs, uno_idxs_fch)
+
+            eps_occ   = self._fch_mo_energy[channel][occ_idxs_fch]
+            eps_unocc = self._fch_mo_energy[channel][uno_idxs_fch]
+
+            delta_e, weight, orders = shakeup_spectrum(
+                K, eps_occ, eps_unocc, order=order, tol=tol)
+            self._shakeup_cache[key] = (Ha * delta_e, weight, orders)
+
+        return self._shakeup_cache[key]
+
+    def get_shakeup_spectrum(self, order="auto", channel=None, sigma=0.5,
+                              npoints=3001, erange=None, tol=0.01):
+        """Broadened valence shake-up probability spectrum P(dE), the
+        f^(n) terms beyond the one-body truncation (see dev/method.md).
+        Convolve this onto a main spectrum's own grid with
+        pymbxas.mbxas.shakeup.convolve_shakeup, or use
+        get_mbxas_spectra(shakeup_order=...) to do that automatically."""
+        from pymbxas.mbxas.shakeup import broaden_shakeup
+
+        delta_e_ev, weight, orders = self._shakeup_sticks(order, channel, tol)
+
+        if erange is None:
+            hi = (delta_e_ev.max() if len(delta_e_ev) else 0.0) + 5 * sigma
+            erange = [-5 * sigma, hi]
+        egrid = np.linspace(erange[0], erange[1], npoints)
+
+        return egrid, broaden_shakeup(delta_e_ev, weight, egrid, sigma), orders
+
     @property
     def _active_mo_occ(self):
         return self._mo_occ[self._channel]

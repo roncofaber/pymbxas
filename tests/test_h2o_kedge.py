@@ -301,3 +301,23 @@ def test_h2o_oxygen_kedge(tmp_path):
         "Spectra GS mo_occ changed across a save/load"
     assert spectra_back._core_orb_idx == spectra._core_orb_idx, \
         "Spectra core_orb_idx changed across a save/load"
+
+    egrid_shakeup, kernel_shakeup, orders_shakeup = spectra_fields.get_shakeup_spectrum(order=1, sigma=0.5)
+    assert len(egrid_shakeup) == len(kernel_shakeup), "shake-up energy/kernel length mismatch"
+    assert np.all(np.isfinite(kernel_shakeup)), "shake-up kernel contains non-finite values"
+    assert orders_shakeup == [1], f"expected orders [1], got {orders_shakeup}"
+
+    # caching: a second call with the same (channel, order, tol) must reuse
+    # the cached sticks rather than recomputing (same object identity)
+    cache_key = (spectra_fields._channel, 1, 0.01)
+    assert cache_key in spectra_fields._shakeup_cache, "shake-up sticks were not cached"
+    cached_before = spectra_fields._shakeup_cache[cache_key]
+    spectra_fields.get_shakeup_spectrum(order=1, sigma=0.7)  # different sigma, same order/channel/tol
+    assert spectra_fields._shakeup_cache[cache_key] is cached_before, \
+        "changing sigma should not invalidate the cached shake-up sticks"
+
+    # explicit channel argument must be accepted (designed-in extension
+    # point for the future cross-spin feature), even though only the
+    # excited channel is exercised meaningfully here
+    _, _, orders_explicit_channel = spectra_fields.get_shakeup_spectrum(order=1, channel=spectra_fields._channel)
+    assert orders_explicit_channel == [1]
