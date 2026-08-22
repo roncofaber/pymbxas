@@ -113,8 +113,76 @@ def test_h2o_oxygen_kedge(tmp_path):
     max_idx = np.argmax(I)
     assert E[0] <= E[max_idx] <= E[-1], f"Spectrum maximum at {E[max_idx]:.1f} eV outside erange [520, 560]"
 
+    # Intensity carries the photon-energy prefactor sigma(omega) ~ omega * |M|^2
+    # (Eq. 4, PRB 107, 035146). Independent restatement; do not simplify by
+    # calling amp2int().
+    per_transition_intensity = exc.mbxas["energies"] * np.mean(amp_library**2, axis=0)
+    spectra_direct = obj.to_spectra(0)
+    assert np.allclose(spectra_direct.amp2int(), per_transition_intensity, atol=1e-15), \
+        "Spectra.amp2int() does not include the omega prefactor"
+
+    # PySCF_mbxas.get_mbxas_spectra and Spectra.get_mbxas_spectra must stay
+    # numerically identical (see dev/method.md gotcha on the three
+    # get_mbxas_spectra implementations).
+    E_spectra, I_spectra = spectra_direct.get_mbxas_spectra(erange=[520, 560], sigma=0.5)
+    assert np.allclose(E, E_spectra) and np.allclose(I, I_spectra, atol=1e-12), \
+        "PySCF_mbxas.get_mbxas_spectra and Spectra.get_mbxas_spectra disagree"
+
     assert amp_library.shape[0] == 3, f"Amplitude first dimension should be 3 (Cartesian), got {amp_library.shape[0]}"
     assert amp_library.shape[1] == len(exc.mbxas["energies"]), f"Amplitude transitions mismatch: {amp_library.shape[1]} vs {len(exc.mbxas['energies'])}"
+
+    from pymbxas.mbxas.shakeup import shakeup_sticks, shakeup_spectrum
+    from pymbxas.mbxas.mbxas import build_A_K
+
+    occ_idxs_gs_ch = np.setdiff1d(np.where(gs.mo_occ[ch] == 1)[0], [exc.orb_idx])
+    occ_idxs_fch_ch = np.where(fch.mo_occ[ch] == 1)[0]
+    uno_idxs_fch_ch = np.where(fch.mo_occ[ch] == 0)[0][1:]
+    mb_overlap_ch = exc.mbxas["mb_overlap"][ch]
+    _, _, K_ch = build_A_K(mb_overlap_ch, occ_idxs_fch_ch, occ_idxs_gs_ch, uno_idxs_fch_ch)
+    eps_occ_ch = fch.mo_energy[ch][occ_idxs_fch_ch]
+    eps_unocc_ch = fch.mo_energy[ch][uno_idxs_fch_ch]
+
+    # order=1 shake-up recovers a plain |K_vc|^2 stick spectrum, one entry
+    # per (valence, conduction) pair
+    e1, w1 = shakeup_sticks(K_ch, eps_occ_ch, eps_unocc_ch, order=1)
+    assert e1.shape == w1.shape == (len(occ_idxs_fch_ch) * len(uno_idxs_fch_ch),), \
+        f"order=1 shake-up stick count mismatch: {e1.shape} vs expected {(len(occ_idxs_fch_ch)*len(uno_idxs_fch_ch),)}"
+    w1_manual = np.abs(K_ch) ** 2
+    assert np.allclose(np.sort(w1), np.sort(w1_manual.ravel()), atol=1e-14), \
+        "order=1 shake-up weights do not match |K_vc|^2"
+
+    # order=2: weight is the antisymmetrized 2x2 minor of K, matching
+    # mbxas-qe's doubles_overlap formula exactly (K(v,c)*K(vp,cp)-K(v,cp)*K(vp,c))
+    e2, w2 = shakeup_sticks(K_ch, eps_occ_ch, eps_unocc_ch, order=2)
+    v0, v1_ = 0, 1
+    c0, c1_ = 0, 1
+    manual_minor = K_ch[v0, c0] * K_ch[v1_, c1_] - K_ch[v0, c1_] * K_ch[v1_, c0]
+    assert any(abs(w - abs(manual_minor) ** 2) < 1e-14 for w in w2), \
+        "no order=2 stick matches the hand-computed 2x2 minor for the first valence/conduction pair"
+
+    # order=3 is explicitly out of scope for this version
+    with pytest.raises(NotImplementedError):
+        shakeup_sticks(K_ch, eps_occ_ch, eps_unocc_ch, order=3)
+
+    # shakeup_spectrum: explicit order=1 includes only order 1; explicit
+    # order=2 always includes both orders (no silent auto-downgrade)
+    de1, dw1, orders1 = shakeup_spectrum(K_ch, eps_occ_ch, eps_unocc_ch, order=1)
+    assert orders1 == [1], f"explicit order=1 should include only order 1, got {orders1}"
+    de2, dw2, orders2 = shakeup_spectrum(K_ch, eps_occ_ch, eps_unocc_ch, order=2)
+    assert orders2 == [1, 2], f"explicit order=2 should include orders [1, 2], got {orders2}"
+    assert len(de2) == len(e1) + len(e2), "order=2 spectrum should concatenate order-1 and order-2 sticks"
+
+    # auto mode never includes an order whose total probability mass is
+    # below tol * order-1 mass; physically, higher-order shake-up should
+    # carry less total probability than order 1
+    assert w2.sum() < w1.sum(), \
+        f"order-2 total shake-up probability ({w2.sum():.3e}) should be smaller than order-1 ({w1.sum():.3e})"
+    de_auto, dw_auto, orders_auto = shakeup_spectrum(K_ch, eps_occ_ch, eps_unocc_ch, order="auto", tol=0.01)
+    assert orders_auto in ([1], [1, 2]), f"auto order resolved to unexpected {orders_auto}"
+    if w2.sum() > 0.01 * w1.sum():
+        assert orders_auto == [1, 2]
+    else:
+        assert orders_auto == [1]
 
     h5_path = obj.save_object(oname="roundtrip.h5", save_path=str(tmp_path))
 
