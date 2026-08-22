@@ -73,6 +73,14 @@ class Spectra():
         self._mo_occ   = data.mo_occ     # shape: (2, norb)
         self._channel  = channel
 
+        # data needed to rebuild A/K for shake-up satellites (both channels,
+        # so the not-yet-implemented cross-spin extension needs no schema
+        # change): shape (2, norb_fch, norb_gs), (2, norb_fch), (2, norb_gs)
+        self._mb_overlap    = mbxas["mb_overlap"]
+        self._fch_mo_energy = data.mo_energy
+        self._gs_mo_occ     = pyscf_obj.gs_data.mo_occ
+        self._core_orb_idx  = excitation.orb_idx
+
         # metadata for clustering and such
         self._el_labels = np.array([-1]*self.CMO.shape[1])
         self._label     = -1
@@ -116,6 +124,12 @@ class Spectra():
         h5.write_array(xas, "amplitude", np.asarray(self._amplitude))
         h5.write_array(xas, "el_labels", np.asarray(self._el_labels))
 
+        shakeup = group.create_group("shakeup")
+        h5.write_array(shakeup, "mb_overlap", np.asarray(self._mb_overlap))
+        h5.write_array(shakeup, "fch_mo_energy", np.asarray(self._fch_mo_energy))
+        h5.write_array(shakeup, "gs_mo_occ", np.asarray(self._gs_mo_occ))
+        shakeup.attrs["core_orb_idx"] = int(self._core_orb_idx)
+
         group.attrs["channel"]   = int(self._channel)
         group.attrs["exc_idx"]   = -1 if self._exc_idx is None else int(self._exc_idx)
         group.attrs["label"]     = int(self._label)
@@ -130,6 +144,12 @@ class Spectra():
         self._energies  = xas["energies"][()]
         self._amplitude = xas["amplitude"][()]
         self._el_labels = xas["el_labels"][()]
+
+        shakeup = group["shakeup"]
+        self._mb_overlap    = shakeup["mb_overlap"][()]
+        self._fch_mo_energy = shakeup["fch_mo_energy"][()]
+        self._gs_mo_occ     = shakeup["gs_mo_occ"][()]
+        self._core_orb_idx  = int(shakeup.attrs["core_orb_idx"])
 
         exc_idx = int(group.attrs["exc_idx"])
         self._channel   = int(group.attrs["channel"])
@@ -283,22 +303,26 @@ class Spectra():
                           erange=None, el_label=None):
         
         if el_label is not None:
-            idxs      = self._el_labels == el_label
-            amplitude = self.amplitude[:,idxs]
-            energies  = self.energies[idxs] 
-            
+            idxs        = self._el_labels == el_label
+            amplitude   = self.amplitude[:,idxs]
+            energies    = self.energies[idxs]
+            energies_ha = self._energies[idxs]
+
         else:
-            amplitude = self.amplitude
-            energies  = self.energies
-            
+            amplitude   = self.amplitude
+            energies    = self.energies
+            energies_ha = self._energies
+
         if erange is None:
             erange = [self.energies.min(), self.energies.max()]
-            
-        # convert amplitude to intensity
+
+        # convert amplitude to intensity: sigma(omega) ~ omega * |M|^2
+        # (Eq. 4, PRB 107, 035146), weighted in the same atomic units (Ha)
+        # as the amplitude
         if axis is None:
-            intensities = self.amp2int(amplitude)
+            intensities = self.amp2int(amplitude, energies_ha)
         else:
-            intensities = amplitude[axis]**2
+            intensities = energies_ha * amplitude[axis]**2
         
         erange, spectra = get_mbxas_spectra(energies, intensities,
                                               sigma=sigma, npoints=npoints,
@@ -309,10 +333,15 @@ class Spectra():
     def get_amplitude_tensor(self):
         return np.einsum("ij,jk->ikj", self.amplitude, self.amplitude.T)
     
-    def amp2int(self, amplitude=None):
+    def amp2int(self, amplitude=None, energies=None):
+        """Amplitude -> isotropic intensity, sigma(omega) ~ omega * |M|^2
+        (Eq. 4, PRB 107, 035146). `energies` must be in Hartree, matching
+        the atomic-unit amplitude; defaults to this spectrum's own."""
         if amplitude is None:
             amplitude = self.amplitude
-        return np.sum(amplitude**2, axis=0) / amplitude.shape[0]
+        if energies is None:
+            energies = self._energies
+        return energies * np.sum(amplitude**2, axis=0) / amplitude.shape[0]
     
     @property
     def _active_mo_occ(self):

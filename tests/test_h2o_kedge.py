@@ -131,6 +131,16 @@ def test_h2o_oxygen_kedge(tmp_path):
     assert amp_library.shape[0] == 3, f"Amplitude first dimension should be 3 (Cartesian), got {amp_library.shape[0]}"
     assert amp_library.shape[1] == len(exc.mbxas["energies"]), f"Amplitude transitions mismatch: {amp_library.shape[1]} vs {len(exc.mbxas['energies'])}"
 
+    spectra_fields = obj.to_spectra(0)
+    assert np.array_equal(spectra_fields._mb_overlap, exc.mbxas["mb_overlap"]), \
+        "Spectra._mb_overlap does not match the excitation's mb_overlap"
+    assert np.array_equal(spectra_fields._fch_mo_energy, fch.mo_energy), \
+        "Spectra._fch_mo_energy does not match the FCH mo_energy"
+    assert np.array_equal(spectra_fields._gs_mo_occ, gs.mo_occ), \
+        "Spectra._gs_mo_occ does not match the GS mo_occ"
+    assert spectra_fields._core_orb_idx == exc.orb_idx, \
+        f"Spectra._core_orb_idx {spectra_fields._core_orb_idx} != exc.orb_idx {exc.orb_idx}"
+
     from pymbxas.mbxas.shakeup import shakeup_sticks, shakeup_spectrum
     from pymbxas.mbxas.mbxas import build_A_K
 
@@ -283,3 +293,11 @@ def test_h2o_oxygen_kedge(tmp_path):
         "Spectra CMO changed across a save/load"
     assert spectra_back.exc_idx == spectra.exc_idx, "Spectra excited index changed across a save/load"
     assert spectra_back.channel == spectra.channel, "Spectra channel changed across a save/load"
+    assert np.array_equal(spectra_back._mb_overlap, spectra._mb_overlap), \
+        "Spectra mb_overlap changed across a save/load"
+    assert np.array_equal(spectra_back._fch_mo_energy, spectra._fch_mo_energy), \
+        "Spectra FCH mo_energy changed across a save/load"
+    assert np.array_equal(spectra_back._gs_mo_occ, spectra._gs_mo_occ), \
+        "Spectra GS mo_occ changed across a save/load"
+    assert spectra_back._core_orb_idx == spectra._core_orb_idx, \
+        "Spectra core_orb_idx changed across a save/load"
