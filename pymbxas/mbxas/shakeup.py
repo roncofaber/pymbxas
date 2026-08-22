@@ -22,14 +22,14 @@ MAX_IMPLEMENTED_ORDER = 2
 def shakeup_sticks(K, eps_occ, eps_unocc, order):
     """Order-k valence shake-up stick spectrum.
 
-    K: (n_occ, n_unocc) matrix for one spin channel (mbxas.mbxas.build_A_K).
-    eps_occ: (n_occ,) orbital energies of the valence manifold indexing K's rows.
-    eps_unocc: (n_unocc,) orbital energies of the conduction manifold indexing K's columns.
+    K: (n_unocc, n_occ) matrix for one spin channel (mbxas.mbxas.build_A_K).
+    eps_occ: (n_occ,) orbital energies of the valence manifold indexing K's columns.
+    eps_unocc: (n_unocc,) orbital energies of the conduction manifold indexing K's rows.
     order: number of simultaneous valence -> conduction excitations.
 
     Returns (delta_e, weight): flat 1D arrays, one entry per combination of
     `order` valence orbitals promoted to `order` conduction orbitals.
-    weight = |det(K[v_combo, c_combo])|**2.
+    weight = |det(K[c_combo, v_combo])|**2.
     """
     if order < 1:
         raise ValueError(f"order must be >= 1, got {order}")

@@ -152,13 +152,15 @@ def test_h2o_oxygen_kedge(tmp_path):
         "order=1 shake-up weights do not match |K_vc|^2"
 
     # order=2: weight is the antisymmetrized 2x2 minor of K, matching
-    # mbxas-qe's doubles_overlap formula exactly (K(v,c)*K(vp,cp)-K(v,cp)*K(vp,c))
+    # mbxas-qe's doubles_overlap formula exactly. K has shape (n_unocc, n_occ),
+    # so K[c,v] = K[conduction_idx, valence_idx]. Use non-degenerate indices
+    # (valence {0,1}, conduction {0,2}) to verify correct axis assignment.
     e2, w2 = shakeup_sticks(K_ch, eps_occ_ch, eps_unocc_ch, order=2)
     v0, v1_ = 0, 1
-    c0, c1_ = 0, 1
-    manual_minor = K_ch[v0, c0] * K_ch[v1_, c1_] - K_ch[v0, c1_] * K_ch[v1_, c0]
+    c0, c1_ = 0, 2
+    manual_minor = K_ch[c0, v0] * K_ch[c1_, v1_] - K_ch[c0, v1_] * K_ch[c1_, v0]
     assert any(abs(w - abs(manual_minor) ** 2) < 1e-14 for w in w2), \
-        "no order=2 stick matches the hand-computed 2x2 minor for the first valence/conduction pair"
+        "no order=2 stick matches the hand-computed 2x2 minor for valence pair (0,1) and conduction pair (0,2)"
 
     # order=3 is explicitly out of scope for this version
     with pytest.raises(NotImplementedError):
