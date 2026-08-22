@@ -335,5 +335,5 @@ def test_h2o_oxygen_kedge(tmp_path):
     assert E_sk.shape == E_none.shape
     assert not np.allclose(I_sk, I_none), \
         "shakeup_order=1 should change the spectrum (H2O/O has nonzero order-1 shake-up mass)"
-    assert np.trapz(I_sk, E_sk) == pytest.approx(np.trapz(I_none, E_none), rel=0.1), \
+    assert np.trapezoid(I_sk, E_sk) == pytest.approx(np.trapezoid(I_none, E_none), rel=0.1), \
         "shake-up convolution should approximately conserve total integrated intensity within the plotted erange"
