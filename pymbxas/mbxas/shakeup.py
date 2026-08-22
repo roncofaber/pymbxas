@@ -139,7 +139,8 @@ def convolve_shakeup(egrid, main_intensity, delta_e, weight, sigma):
     kernel = kernel / (kernel.sum() * de)  # normalize to unit probability
 
     def _convolve_1d(y):
-        return np.convolve(y, kernel, mode="same") * de
+        full = np.convolve(y, kernel, mode="full") * de
+        return full[n_half:n_half + len(y)]
 
     main_intensity = np.asarray(main_intensity)
     if main_intensity.ndim == 1:
