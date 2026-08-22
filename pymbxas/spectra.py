@@ -300,8 +300,8 @@ class Spectra():
         return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T, b_ovlp, iaos))))
     
     def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
-                          erange=None, el_label=None):
-        
+                          erange=None, el_label=None, shakeup_order=None):
+
         if el_label is not None:
             idxs        = self._el_labels == el_label
             amplitude   = self.amplitude[:,idxs]
@@ -323,11 +323,16 @@ class Spectra():
             intensities = self.amp2int(amplitude, energies_ha)
         else:
             intensities = energies_ha * amplitude[axis]**2
-        
+
         erange, spectra = get_mbxas_spectra(energies, intensities,
                                               sigma=sigma, npoints=npoints,
                                               tol=tol, erange=erange)
-        
+
+        if shakeup_order is not None:
+            from pymbxas.mbxas.shakeup import convolve_shakeup
+            delta_e_ev, weight, _ = self._shakeup_sticks(shakeup_order, None, tol)
+            spectra = convolve_shakeup(erange, spectra, delta_e_ev, weight, sigma)
+
         return erange, spectra
         
     def get_amplitude_tensor(self):

@@ -321,3 +321,19 @@ def test_h2o_oxygen_kedge(tmp_path):
     # excited channel is exercised meaningfully here
     _, _, orders_explicit_channel = spectra_fields.get_shakeup_spectrum(order=1, channel=spectra_fields._channel)
     assert orders_explicit_channel == [1]
+
+    # shakeup_order=None (the default) must be byte-identical to the
+    # existing get_mbxas_spectra call already exercised above
+    E_none, I_none = spectra_fields.get_mbxas_spectra(erange=[520, 560], sigma=0.5)
+    assert np.array_equal(E_none, E_spectra) and np.array_equal(I_none, I_spectra), \
+        "shakeup_order=None changed get_mbxas_spectra output"
+
+    # shakeup_order=1 must change the spectrum shape (correction is applied)
+    # but conserve total integrated intensity, since convolution conserves
+    # the integral of a unit-normalized kernel
+    E_sk, I_sk = spectra_fields.get_mbxas_spectra(erange=[520, 560], sigma=0.5, shakeup_order=1)
+    assert E_sk.shape == E_none.shape
+    assert not np.allclose(I_sk, I_none), \
+        "shakeup_order=1 should change the spectrum (H2O/O has nonzero order-1 shake-up mass)"
+    assert np.trapz(I_sk, E_sk) == pytest.approx(np.trapz(I_none, E_none), rel=0.1), \
+        "shake-up convolution should approximately conserve total integrated intensity within the plotted erange"
