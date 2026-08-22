@@ -10,6 +10,27 @@ import numpy as np
 
 #%%
 
+def build_A_K(mb_overlap_channel, occ_idxs_fch, occ_idxs_gs, uno_idxs_fch):
+    """Valence overlap determinant and K matrix for one spin channel.
+
+    mb_overlap_channel: (norb_fch, norb_gs) overlap between one channel's
+        FCH and GS orbitals, i.e. mb_overlap[channel].
+    occ_idxs_fch, uno_idxs_fch: FCH occupied/unoccupied valence orbital
+        indices for that channel (core orbital excluded from both).
+    occ_idxs_gs: GS occupied valence orbital indices for that channel
+        (excited core orbital excluded).
+
+    Returns (AMat, ADet, KMat): AMat is the square valence overlap matrix,
+    ADet its determinant, KMat = A'Mat @ inv(AMat) the matrix used both for
+    the n=1 amplitude (Eq. 22, PRB 107,035146) and, at higher order, for
+    shake-up minors (see mbxas.shakeup).
+    """
+    AMat = mb_overlap_channel[np.ix_(occ_idxs_fch, occ_idxs_gs)]
+    ADet = np.linalg.det(AMat)
+    APrimeMat = mb_overlap_channel[np.ix_(uno_idxs_fch, occ_idxs_gs)]
+    KMat = APrimeMat @ np.linalg.inv(AMat)
+    return AMat, ADet, KMat
+
 # Function to run MBXAS of pyscf calculators
 def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None):
     try:
@@ -57,17 +78,8 @@ def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None
     occ_idxs_gs  = np.setdiff1d(gs_occ_idxs, [gs_orb_idx])
     uno_idxs_fch = np.where(fch_calc.mo_occ[channel] == 0)[0][1:]
 
-    # Extract occupied block of the MB matrix (excited channel)
-    AMat = mb_overlap[channel][np.ix_(occ_idxs_fch, occ_idxs_gs)]
-
-    # Determinant of AMat
-    ADet = np.linalg.det(AMat)
-
-    # Extract unoccupied block of the MB matrix (excited channel)
-    APrimeMat = mb_overlap[channel][np.ix_(uno_idxs_fch, occ_idxs_gs)]
-
-    # Calculate KMat
-    KMat = APrimeMat @ np.linalg.inv(AMat)
+    # Extract A/K matrices for the excited channel
+    AMat, ADet, KMat = build_A_K(mb_overlap[channel], occ_idxs_fch, occ_idxs_gs, uno_idxs_fch)
 
     # Transition dipole moments from excited orbital (excited channel)
     chb_xmat     = dipole_KS[channel][:, :, exc_orb_idx]
