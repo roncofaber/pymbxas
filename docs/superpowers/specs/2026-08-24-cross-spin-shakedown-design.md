@@ -125,9 +125,30 @@ where `delta_e < 0`. Adds a boolean mask/filter, not a new computation.
 ## Testing
 
 H2O/N2 are aufbau-like, symmetric, and don't naturally produce negative
-`delta_e` or large cross-channel terms, so verification again leans on
-cache-seeded synthetic sticks and hand-computed outer-sum/outer-product
-arithmetic on small arrays -- same pattern as the original feature's erange
-fix. `spectator_order=None`/`max_total_order=None` must remain byte-identical
-to current output (hard regression requirement, mirroring the original
-feature's `shakeup_order=None` guarantee).
+`delta_e` or large cross-channel terms, so automated verification (in
+`tests/test_h2o_kedge.py`, per the project's one-file test convention) again
+leans on cache-seeded synthetic sticks and hand-computed outer-sum/outer-
+product arithmetic on small arrays -- same pattern as the original feature's
+erange fix. `spectator_order=None`/`max_total_order=None` must remain
+byte-identical to current output (hard regression requirement, mirroring the
+original shake-up feature's `shakeup_order=None` guarantee).
+
+**Real-molecule demo script (not part of the automated suite).** An
+open-shell Cu(II) complex is a better showcase for this feature than H2O/N2:
+it has an intrinsically unpaired spin, so the spectator channel's own
+valence relaxation is physically meaningful rather than a near-symmetric
+echo of the excited channel. The implementation plan adds one script,
+following the existing `n2_shakeup_compare.py`/`h2o_shakeup_compare.py`
+pattern, built from `~/Downloads/17949957.mol` (a Cu bis-diketonate-type
+complex, heavy atoms only -- C/O/Cu, no explicit H in the source file).
+The script uses RDKit (`Chem.MolFromMolFile` +
+`Chem.AddHs(mol, addCoords=True)`) to add hydrogens before converting to an
+ASE `Atoms` object for `PySCF_mbxas`, and exercises `spectator_order`,
+`max_total_order`, and `shakedown_only` alongside the existing
+`shakeup_order`. Like the two existing scripts, it is a runnable file the
+user executes later themselves -- the plan's task only writes it; it is
+never invoked as part of implementation or review. RDKit is not currently
+installed in the `pymbxas` conda env and is not added as a pymbxas
+dependency -- it is only imported inside this one demo script, for the
+user to install themselves (e.g. `conda install -c conda-forge rdkit`)
+before running it.
