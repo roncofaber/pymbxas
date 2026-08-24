@@ -13,6 +13,9 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - `Spectra.get_shakeup_summary()` returns bare and shake-up-corrected spectra together with the underlying probability curve
 - Optional `pymbxas[plot]` extra adds `pymbxas.plotting.plot_shakeup_summary()` for a ready-made shake-up comparison figure
 - HDF5 file creation, file reads, and SCF snapshot writes now log at debug level
+- `spectator_order` on `get_mbxas_spectra` adds shake-up satellites from the non-excited spin channel's own valence relaxation
+- `shakedown_only` isolates negative-energy shake-down combinations in shake-up spectra
+- `get_shakeup_summary` now reports a `shakedown_fraction` for the shake-up probability distribution
 
 ### Changed
 - Spectral intensity now includes the photon-energy prefactor of the absorption cross section, so relative peak heights shift slightly across an edge
