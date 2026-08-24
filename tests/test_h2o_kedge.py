@@ -235,6 +235,24 @@ def test_h2o_oxygen_kedge(tmp_path):
     else:
         assert orders_auto == [1]
 
+    from pymbxas.mbxas.shakeup import shakeup_sticks_by_order
+
+    sticks_by_order_2, orders_by_order_2 = shakeup_sticks_by_order(K_ch, eps_occ_ch, eps_unocc_ch, order=2)
+    assert orders_by_order_2 == [1, 2], f"expected orders [1, 2], got {orders_by_order_2}"
+    assert np.array_equal(sticks_by_order_2[1][0], e1) and np.array_equal(sticks_by_order_2[1][1], w1), \
+        "shakeup_sticks_by_order order-1 entry should match shakeup_sticks(order=1)"
+    assert np.array_equal(sticks_by_order_2[2][0], e2) and np.array_equal(sticks_by_order_2[2][1], w2), \
+        "shakeup_sticks_by_order order-2 entry should match shakeup_sticks(order=2)"
+
+    de2_from_dict = np.concatenate([sticks_by_order_2[k][0] for k in orders_by_order_2])
+    dw2_from_dict = np.concatenate([sticks_by_order_2[k][1] for k in orders_by_order_2])
+    assert np.array_equal(de2_from_dict, de2) and np.array_equal(dw2_from_dict, dw2), \
+        "shakeup_spectrum(order=2) must equal the concatenation of shakeup_sticks_by_order's entries"
+
+    sticks_by_order_down, _ = shakeup_sticks_by_order(K_ch, eps_occ_ch, eps_unocc_ch, order=1, shakedown_only=True)
+    assert np.array_equal(np.sort(sticks_by_order_down[1][0]), np.sort(e1_down)), \
+        "shakeup_sticks_by_order should forward shakedown_only to shakeup_sticks"
+
     from pymbxas.mbxas.shakeup import broaden_shakeup, convolve_shakeup
 
     # broaden_shakeup with empty sticks reduces to a single normalized

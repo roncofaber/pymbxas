@@ -78,28 +78,24 @@ def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False):
     return delta_e, weight
 
 
-def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01):
-    """Combined shake-up stick spectrum up to the requested order.
+def shakeup_sticks_by_order(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):
+    """Per-order valence shake-up sticks, order 1 up to the requested order.
 
-    order: "auto" adds each order from 2 up to MAX_IMPLEMENTED_ORDER only
-        while its total weight exceeds tol * (order-1 total weight),
-        stopping at the first order that fails -- so adding a higher
-        MAX_IMPLEMENTED_ORDER later extends "auto" automatically, no
-        separate rewrite needed here. An explicit int always includes
-        every order from 1 up to and including that int, no tolerance check.
-
-    Returns (delta_e, weight, orders_included): concatenated sticks across
-    all included orders, plus the sorted list of orders actually included.
+    Same order/tol/shakedown_only semantics as shakeup_spectrum. Returns
+    (sticks_by_order, orders_included): sticks_by_order is
+    {order: (delta_e, weight)} for each order actually included -- the
+    per-order breakdown mbxas.shakeup.combine_cross_channel_sticks needs;
+    shakeup_spectrum concatenates this into its flat (delta_e, weight)
+    contract for callers that don't need the breakdown.
     """
-    e1, w1 = shakeup_sticks(K, eps_occ, eps_unocc, 1)
+    e1, w1 = shakeup_sticks(K, eps_occ, eps_unocc, 1, shakedown_only=shakedown_only)
     mass1 = w1.sum()
+    sticks_by_order = {1: (e1, w1)}
+    orders_included = [1]
 
     if order == "auto":
-        all_e = [e1]
-        all_w = [w1]
-        orders_included = [1]
         for k in range(2, MAX_IMPLEMENTED_ORDER + 1):
-            ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k)
+            ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only)
             massk = wk.sum()
             include = mass1 > 0 and massk > tol * mass1
             logger.log(TRACE,
@@ -108,24 +104,40 @@ def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01):
                 "included" if include else "stopped")
             if not include:
                 break
-            all_e.append(ek)
-            all_w.append(wk)
+            sticks_by_order[k] = (ek, wk)
             orders_included.append(k)
-        return np.concatenate(all_e), np.concatenate(all_w), orders_included
+        return sticks_by_order, orders_included
 
     order = int(order)
     if order < 1:
         raise ValueError(f"order must be >= 1 or 'auto', got {order}")
-    if order == 1:
-        return e1, w1, [1]
-
-    all_e = [e1]
-    all_w = [w1]
     for k in range(2, order + 1):
-        ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k)
-        all_e.append(ek)
-        all_w.append(wk)
-    return np.concatenate(all_e), np.concatenate(all_w), list(range(1, order + 1))
+        ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only)
+        sticks_by_order[k] = (ek, wk)
+        orders_included.append(k)
+    return sticks_by_order, orders_included
+
+
+def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):
+    """Combined shake-up stick spectrum up to the requested order.
+
+    order: "auto" adds each order from 2 up to MAX_IMPLEMENTED_ORDER only
+        while its total weight exceeds tol * (order-1 total weight),
+        stopping at the first order that fails -- so adding a higher
+        MAX_IMPLEMENTED_ORDER later extends "auto" automatically, no
+        separate rewrite needed here. An explicit int always includes
+        every order from 1 up to and including that int, no tolerance check.
+    shakedown_only: see shakeup_sticks.
+
+    Returns (delta_e, weight, orders_included): concatenated sticks across
+    all included orders, plus the sorted list of orders actually included.
+    Delegates the per-order construction to shakeup_sticks_by_order.
+    """
+    sticks_by_order, orders_included = shakeup_sticks_by_order(
+        K, eps_occ, eps_unocc, order=order, tol=tol, shakedown_only=shakedown_only)
+    all_e = [sticks_by_order[k][0] for k in orders_included]
+    all_w = [sticks_by_order[k][1] for k in orders_included]
+    return np.concatenate(all_e), np.concatenate(all_w), orders_included
 
 
 def broaden_shakeup(delta_e, weight, egrid, sigma):
