@@ -24,7 +24,10 @@ def plot_shakeup_summary(summary, show_probability=True):
 
     energy = summary["energy"]
     spectra = summary["spectra"]
-    max_order = max(spectra)
+    order_keys = sorted(k for k in spectra if isinstance(k, int))
+    max_order = max(order_keys) if order_keys else 0
+    has_cross = "cross" in spectra
+    plot_keys = order_keys + (["cross"] if has_cross else [])
 
     if show_probability:
         fig, (ax_main, ax_prob) = plt.subplots(
@@ -36,12 +39,16 @@ def plot_shakeup_summary(summary, show_probability=True):
         axes = [ax_main]
 
     labels = {0: "no shake-up"}
-    labels.update({k: "shakeup_order={}".format(k) for k in spectra if k > 0})
+    labels.update({k: "shakeup_order={}".format(k) for k in order_keys if k > 0})
     styles = {0: dict(color="crimson", lw=1.8)}
-    for k in range(1, max_order + 1):
-        styles[k] = dict(lw=1.6, ls="--" if k == 1 else ":")
+    for k in order_keys:
+        if k > 0:
+            styles[k] = dict(lw=1.6, ls="--" if k == 1 else ":")
+    if has_cross:
+        labels["cross"] = "cross-spin + shake-up"
+        styles["cross"] = dict(color="teal", lw=1.6, ls="-.")
 
-    for k in sorted(spectra):
+    for k in plot_keys:
         ax_main.plot(energy, spectra[k], label=labels[k], **styles[k])
     ax_main.set_xlim(energy[0], energy[-1])
     ax_main.set_ylim(bottom=0)

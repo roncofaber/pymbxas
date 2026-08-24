@@ -574,3 +574,61 @@ def test_h2o_oxygen_kedge(tmp_path):
     E_shakedown, I_shakedown = spectra_fields.get_mbxas_spectra(
         erange=[520, 560], sigma=0.5, shakeup_order=1, shakedown_only=True)
     assert np.all(np.isfinite(I_shakedown))
+
+    summary2 = spectra_fields.get_shakeup_summary(order=1, sigma=0.5, erange=[520, 560])
+    assert "shakedown_fraction" in summary2, "get_shakeup_summary should report shakedown_fraction"
+    assert 0.0 <= summary2["shakedown_fraction"] <= 1.0, \
+        f"shakedown_fraction should be a probability fraction in [0, 1], got {summary2['shakedown_fraction']}"
+
+    summary_cross = spectra_fields.get_shakeup_summary(
+        order=1, sigma=0.5, erange=[520, 560], spectator_order=1)
+    assert set(summary_cross["spectra"].keys()) == {0, 1, "cross"}, \
+        f"spectator_order should add a 'cross' entry, got {set(summary_cross['spectra'].keys())}"
+    assert np.array_equal(summary_cross["spectra"][0], summary2["spectra"][0]), \
+        "spectator_order should not change the existing bare spectrum entry"
+    assert np.array_equal(summary_cross["spectra"][1], summary2["spectra"][1]), \
+        "spectator_order should not change the existing order-1 spectrum entry"
+
+    E_cross_direct, I_cross_direct = spectra_fields.get_mbxas_spectra(
+        erange=[520, 560], sigma=0.5, shakeup_order=1, spectator_order=1)
+    assert np.array_equal(summary_cross["energy"], E_cross_direct)
+    assert np.array_equal(summary_cross["spectra"]["cross"], I_cross_direct), \
+        "get_shakeup_summary's 'cross' entry should match a direct get_mbxas_spectra(shakeup_order=order, spectator_order=...) call"
+    assert summary_cross["integrated"]["cross"] == pytest.approx(np.trapezoid(I_cross_direct, E_cross_direct)), \
+        "get_shakeup_summary's cross integrated intensity mismatch"
+
+    # shakedown_fraction warning: temporarily seed the real (channel, 1, tol)
+    # cache entry with a synthetic negative-heavy stick set to exercise the
+    # warning path without needing a molecule that actually shakes down
+    warn_cache_key = (spectra_fields._channel, 1, 0.01)
+    real_cached_value = spectra_fields._shakeup_cache[warn_cache_key]
+    spectra_fields._shakeup_cache[warn_cache_key] = (
+        np.array([-10.0, 3.0]), np.array([0.9, 0.1]), [1])
+
+    class _RecordCollector2(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+        def emit(self, record):
+            self.records.append(record)
+
+    collector2 = _RecordCollector2()
+    spectra_logger = logging.getLogger("pymbxas.spectra")
+    spectra_logger.addHandler(collector2)
+    spectra_logger.setLevel(logging.WARNING)
+    try:
+        summary_warn = spectra_fields.get_shakeup_summary(
+            order=1, sigma=0.5, erange=[520, 560], tol=0.01)
+    finally:
+        spectra_logger.removeHandler(collector2)
+        spectra_fields._shakeup_cache[warn_cache_key] = real_cached_value
+
+    assert summary_warn["shakedown_fraction"] == pytest.approx(0.45), \
+        f"expected shakedown_fraction 0.9/(0.9+0.1+1)=0.45 with the seeded sticks, got {summary_warn['shakedown_fraction']}"
+    assert any("shake-down" in r.getMessage() for r in collector2.records), \
+        "get_shakeup_summary should warn when shakedown_fraction exceeds tol"
+
+    # plot_shakeup_summary must also handle a summary with a "cross" entry
+    fig_cross, axes_cross = plot_shakeup_summary(summary_cross, show_probability=True)
+    assert len(axes_cross) == 2
+    _plt.close(fig_cross)

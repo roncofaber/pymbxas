@@ -10,6 +10,7 @@ Created on Mon Jun 26 10:33:37 2023
 import numpy as np
 from functools import reduce
 import copy
+import logging
 
 # pymbxas utils
 from pymbxas.build.structure import rotate_structure, ase_to_mole
@@ -24,6 +25,7 @@ from pyscf.lo import iao, orth
 
 from ase import units
 Ha = units.Ha
+logger = logging.getLogger(__name__)
 
 #%%
 
@@ -524,7 +526,9 @@ class Spectra():
 
         return egrid, broaden_shakeup(delta_e_ev, weight, egrid, sigma), orders
 
-    def get_shakeup_summary(self, order=2, sigma=0.5, npoints=3001, erange=None, tol=0.01):
+    def get_shakeup_summary(self, order=2, sigma=0.5, npoints=3001, erange=None,
+                              tol=0.01, spectator_order=None, max_total_order=None,
+                              shakedown_only=False):
         """Compare a spectrum with and without the shake-up correction, up
         to and including the given order (both bare and every intermediate
         order 1..order are included, plus the shake-up probability curve
@@ -532,9 +536,18 @@ class Spectra():
 
             "energy"      : (npoints,) shared energy grid, eV
             "spectra"     : {0: bare, 1: order-1, ..., order: order-1..order}
+                            plus "cross" (the fully combined excited +
+                            spectator correction) when spectator_order is given
             "integrated"  : {same keys} -> trapezoidal integral of each spectrum
             "probability" : (delta_e, curve, orders_included) from
-                             get_shakeup_spectrum(order=order, sigma=sigma)
+                             get_shakeup_spectrum(order=order, sigma=sigma, ...)
+            "shakedown_fraction" : fraction of shake-up probability mass with
+                             delta_e < 0 ("shake-down", mbxas-qe's
+                             kpoint_spectral_details.f90 convention), for
+                             whichever stick set (cross-combined if
+                             spectator_order is given, else the plain
+                             excited-channel one) backs the correction above.
+                             A warning is logged if this exceeds tol.
 
         Data only, no plotting -- see dev/method.md for what the numbers mean.
         """
@@ -549,16 +562,36 @@ class Spectra():
                                                    tol=tol, shakeup_order=k)
             spectra[k] = intensity
 
+        if spectator_order is not None:
+            _, intensity_cross = self.get_mbxas_spectra(
+                sigma=sigma, npoints=npoints, erange=[energy[0], energy[-1]],
+                tol=tol, shakeup_order=order, spectator_order=spectator_order,
+                max_total_order=max_total_order, shakedown_only=shakedown_only)
+            spectra["cross"] = intensity_cross
+
         integrated = {k: np.trapezoid(I, energy) for k, I in spectra.items()}
 
         prob_e, prob_curve, prob_orders = self.get_shakeup_spectrum(
-            order=order, sigma=sigma, tol=tol)
+            order=order, sigma=sigma, tol=tol, spectator_order=spectator_order,
+            max_total_order=max_total_order)
+
+        delta_e_frac, weight_frac = self._combined_shakeup_sticks(
+            order, spectator_order, max_total_order, tol, False)
+        total_mass = weight_frac.sum() + 1.0  # +1 for the implicit n=0 "no shake-up" term
+        shakedown_mass = weight_frac[delta_e_frac < 0].sum() if len(delta_e_frac) else 0.0
+        shakedown_fraction = shakedown_mass / total_mass if total_mass > 0 else 0.0
+        if shakedown_fraction > tol:
+            logger.warning(
+                "shake-down fraction %.4f exceeds tol=%.3g: a non-negligible "
+                "share of shake-up probability mass has delta_e < 0",
+                shakedown_fraction, tol)
 
         return {
             "energy": energy,
             "spectra": spectra,
             "integrated": integrated,
             "probability": (prob_e, prob_curve, prob_orders),
+            "shakedown_fraction": shakedown_fraction,
         }
 
     @property
