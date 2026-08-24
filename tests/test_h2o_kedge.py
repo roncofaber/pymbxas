@@ -269,6 +269,23 @@ def test_h2o_oxygen_kedge(tmp_path):
     assert np.array_equal(occ_fch_h, occ_fch), "occ_unocc_indices FCH occupied indices mismatch"
     assert np.array_equal(uno_fch_h, uno_fch), "occ_unocc_indices FCH unoccupied indices mismatch"
 
+    from pymbxas.mbxas.mbxas import spectator_occ_unocc_indices
+
+    spec_ch = 1 - ch
+    occ_gs_spec_h, occ_fch_spec_h, uno_fch_spec_h = spectator_occ_unocc_indices(
+        gs.mo_occ[spec_ch], fch.mo_occ[spec_ch])
+    assert np.array_equal(occ_gs_spec_h, np.where(gs.mo_occ[spec_ch] == 1)[0]), \
+        "spectator_occ_unocc_indices GS occupied indices mismatch (no core orbital should be removed)"
+    assert np.array_equal(occ_fch_spec_h, np.where(fch.mo_occ[spec_ch] == 1)[0]), \
+        "spectator_occ_unocc_indices FCH occupied indices mismatch"
+    assert np.array_equal(uno_fch_spec_h, np.where(fch.mo_occ[spec_ch] == 0)[0]), \
+        "spectator_occ_unocc_indices FCH unoccupied indices mismatch (no core-hole index should be dropped)"
+    assert len(occ_gs_spec_h) == len(occ_fch_spec_h), \
+        "spectator channel electron count should be unchanged between GS and FCH"
+
+    with pytest.raises(ValueError):
+        spectator_occ_unocc_indices(gs.mo_occ[ch], fch.mo_occ[ch])  # excited channel has a core hole
+
     # get_shakeup_spectrum's default erange must widen on the negative side
     # too, not just the positive one -- a negative shake-up stick is
     # possible for a non-aufbau MOM-converged state, not exercised by

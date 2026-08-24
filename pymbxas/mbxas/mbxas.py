@@ -33,6 +33,32 @@ def occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel, core_orb_idx):
     return occ_idxs_gs, occ_idxs_fch, uno_idxs_fch
 
 
+def spectator_occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel):
+    """Occupied/unoccupied valence orbital indices for the spectator
+    (non-excited) spin channel's own shake-up (mbxas.shakeup), the
+    cross-spin contribution of mbxas-qe's spin_convolve_spectrum.
+
+    Unlike occ_unocc_indices, there is no core orbital to remove and no
+    core-hole index to drop from the unoccupied set: this channel keeps
+    its full ground-state electron count in the FCH calculation, so its
+    valence relaxation is a plain particle-hole excitation, not a
+    core-hole one.
+
+    Returns (occ_idxs_gs, occ_idxs_fch, uno_idxs_fch).
+    """
+    occ_idxs_gs  = np.where(gs_mo_occ_channel == 1)[0]
+    occ_idxs_fch = np.where(fch_mo_occ_channel == 1)[0]
+    if len(occ_idxs_gs) != len(occ_idxs_fch):
+        raise ValueError(
+            "Spectator channel electron count changed between GS and FCH "
+            f"({len(occ_idxs_gs)} -> {len(occ_idxs_fch)}); this channel "
+            "should be the one without a core hole. Pass the excited "
+            "channel to occ_unocc_indices instead."
+        )
+    uno_idxs_fch = np.where(fch_mo_occ_channel == 0)[0]
+    return occ_idxs_gs, occ_idxs_fch, uno_idxs_fch
+
+
 def build_A_K(mb_overlap_channel, occ_idxs_fch, occ_idxs_gs, uno_idxs_fch):
     """Valence overlap determinant and K matrix for one spin channel.
 
