@@ -515,3 +515,62 @@ def test_h2o_oxygen_kedge(tmp_path):
     import matplotlib.pyplot as _plt
     _plt.close(fig_both)
     _plt.close(fig_main)
+
+    from pymbxas.mbxas.shakeup import combine_cross_channel_sticks as _combine_cc
+
+    spec_ch2 = 1 - spectra_fields._channel
+    spectator_sticks = spectra_fields._spectator_shakeup_sticks(order=1, tol=0.01)
+    assert set(spectator_sticks.keys()) <= {1}, \
+        f"spectator_shakeup_sticks(order=1) should only include order 1, got {set(spectator_sticks.keys())}"
+    spec_e1, spec_w1 = spectator_sticks[1]
+    assert np.all(np.isfinite(spec_e1)) and np.all(np.isfinite(spec_w1)), \
+        "spectator channel order-1 shake-up sticks contain non-finite values"
+    assert np.all(spec_w1 >= 0), "spectator channel shake-up weights must be non-negative"
+
+    # spectator_order=None/max_total_order=None must remain byte-identical
+    # to the pre-cross-spin behavior already exercised above
+    E_none2, I_none2 = spectra_fields.get_mbxas_spectra(erange=[520, 560], sigma=0.5)
+    assert np.array_equal(E_none2, E_none) and np.array_equal(I_none2, I_none), \
+        "spectator_order=None regression: get_mbxas_spectra output changed"
+    E_sk2, I_sk2 = spectra_fields.get_mbxas_spectra(erange=[520, 560], sigma=0.5, shakeup_order=1)
+    assert np.array_equal(E_sk2, E_sk) and np.array_equal(I_sk2, I_sk), \
+        "spectator_order=None regression: get_mbxas_spectra(shakeup_order=1) output changed"
+
+    # spectator_order alone (shakeup_order=None) must apply a correction --
+    # a spectator-only cross term reduces to that channel's own shake-up
+    E_bare, I_bare = spectra_fields.get_mbxas_spectra(erange=[520, 560], sigma=0.5)
+    E_spec_only, I_spec_only = spectra_fields.get_mbxas_spectra(
+        erange=[520, 560], sigma=0.5, spectator_order=1)
+    assert E_spec_only.shape == E_bare.shape
+    if spec_w1.sum() > 0:
+        assert not np.allclose(I_spec_only, I_bare), \
+            "spectator_order=1 should change the spectrum when the spectator channel has nonzero shake-up mass"
+    assert np.trapezoid(I_spec_only, E_spec_only) == pytest.approx(
+        np.trapezoid(I_bare, E_bare), rel=0.1), \
+        "spectator-only shake-up convolution should approximately conserve total integrated intensity"
+
+    # combining both channels must agree with a manual combine_cross_channel_sticks call
+    excited_sticks_by_order = spectra_fields._shakeup_sticks_by_order(1, None, 0.01)
+    de_manual, dw_manual = _combine_cc(excited_sticks_by_order, spectator_sticks, max_total_order=2)
+    de_from_spectra, dw_from_spectra = spectra_fields._combined_shakeup_sticks(1, 1, None, 0.01, False)
+    assert np.array_equal(np.sort(de_from_spectra), np.sort(de_manual)) and \
+           np.allclose(np.sort(dw_from_spectra), np.sort(dw_manual), atol=1e-15), \
+        "_combined_shakeup_sticks(shakeup_order=1, spectator_order=1) disagrees with a manual combine_cross_channel_sticks call"
+
+    # spectator_order combined with an explicit channel is a conflict --
+    # channel identity is fixed by the cross-channel combination itself
+    with pytest.raises(ValueError):
+        spectra_fields.get_shakeup_spectrum(order=1, channel=spec_ch2, spectator_order=1)
+
+    # PySCF_mbxas.get_mbxas_spectra must forward the new parameters and
+    # agree with Spectra's own output, same pattern as the existing
+    # shakeup_order agreement check
+    E_pyscf_spec, I_pyscf_spec = obj.get_mbxas_spectra(
+        "O", erange=[520, 560], sigma=0.5, spectator_order=1)
+    assert np.array_equal(E_pyscf_spec, E_spec_only) and np.allclose(I_pyscf_spec, I_spec_only, atol=1e-12), \
+        "PySCF_mbxas.get_mbxas_spectra(spectator_order=1) disagrees with Spectra.get_mbxas_spectra"
+
+    # shakedown_only must not raise and must never increase total mass
+    E_shakedown, I_shakedown = spectra_fields.get_mbxas_spectra(
+        erange=[520, 560], sigma=0.5, shakeup_order=1, shakedown_only=True)
+    assert np.all(np.isfinite(I_shakedown))

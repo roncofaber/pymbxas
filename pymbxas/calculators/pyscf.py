@@ -371,7 +371,8 @@ class PySCF_mbxas():
     
 
     def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.5, npoints=3001, tol=0.01,
-                          erange=None, shakeup_order=None):
+                          erange=None, shakeup_order=None, spectator_order=None,
+                          max_total_order=None, shakedown_only=False):
 
         ato_idxs = atoms_to_indexes(self.structure, ato_idx)
         matched = [i for i, exc in enumerate(self.excitations) if exc.ato_idx in ato_idxs]
@@ -390,7 +391,10 @@ class PySCF_mbxas():
             energy, intensity = sp.get_mbxas_spectra(axis=axis, sigma=sigma,
                                                       npoints=npoints, tol=tol,
                                                       erange=erange,
-                                                      shakeup_order=shakeup_order)
+                                                      shakeup_order=shakeup_order,
+                                                      spectator_order=spectator_order,
+                                                      max_total_order=max_total_order,
+                                                      shakedown_only=shakedown_only)
             intensity_sum = intensity if intensity_sum is None else intensity_sum + intensity
 
         return energy, intensity_sum

@@ -300,7 +300,9 @@ class Spectra():
         return np.dot(iaos, orth.lowdin(reduce(np.dot, (iaos.T, b_ovlp, iaos))))
     
     def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
-                          erange=None, el_label=None, shakeup_order=None):
+                          erange=None, el_label=None, shakeup_order=None,
+                          spectator_order=None, max_total_order=None,
+                          shakedown_only=False):
 
         if el_label is not None:
             idxs        = self._el_labels == el_label
@@ -328,9 +330,10 @@ class Spectra():
                                               sigma=sigma, npoints=npoints,
                                               tol=tol, erange=erange)
 
-        if shakeup_order is not None:
+        if shakeup_order is not None or spectator_order is not None:
             from pymbxas.mbxas.shakeup import convolve_shakeup
-            delta_e_ev, weight, _ = self._shakeup_sticks(shakeup_order, None, tol)
+            delta_e_ev, weight = self._combined_shakeup_sticks(
+                shakeup_order, spectator_order, max_total_order, tol, shakedown_only)
             spectra = convolve_shakeup(erange, spectra, delta_e_ev, weight, sigma)
 
         return erange, spectra
@@ -348,26 +351,23 @@ class Spectra():
             energies = self._energies
         return energies * np.sum(amplitude**2, axis=0) / amplitude.shape[0]
 
-    def _shakeup_sticks(self, order, channel, tol):
-        """Cached (delta_e_ev, weight, orders_included) for one spin channel.
-        `channel=None` defaults to the excited channel; an explicit channel
-        is accepted so a future cross-spin feature can call this on the
-        other channel without a signature change.
+    def _shakeup_sticks_by_order(self, order, channel, tol):
+        """Cached {order: (delta_e_ev, weight)} for one spin channel -- the
+        per-order form _shakeup_sticks concatenates, and the form
+        combine_cross_channel_sticks (mbxas.shakeup) needs directly.
 
-        Safe across transform(): that only rotates/permutes mo_coeff and
-        amplitude, never mb_overlap/mo_occ/mo_energy/core_orb_idx, so a
-        cache built before a transform() call stays valid after it."""
+        Safe across transform(): see _shakeup_sticks."""
         from pymbxas.mbxas.mbxas import build_A_K, occ_unocc_indices
-        from pymbxas.mbxas.shakeup import shakeup_spectrum
+        from pymbxas.mbxas.shakeup import shakeup_sticks_by_order
 
         if channel is None:
             channel = self._channel
 
-        if not hasattr(self, "_shakeup_cache"):
-            self._shakeup_cache = {}
+        if not hasattr(self, "_shakeup_cache_by_order"):
+            self._shakeup_cache_by_order = {}
 
         key = (channel, order, tol)
-        if key not in self._shakeup_cache:
+        if key not in self._shakeup_cache_by_order:
             occ_idxs_gs, occ_idxs_fch, uno_idxs_fch = occ_unocc_indices(
                 self._gs_mo_occ[channel], self._mo_occ[channel], self._core_orb_idx)
 
@@ -377,22 +377,137 @@ class Spectra():
             eps_occ   = self._fch_mo_energy[channel][occ_idxs_fch]
             eps_unocc = self._fch_mo_energy[channel][uno_idxs_fch]
 
-            delta_e, weight, orders = shakeup_spectrum(
-                K, eps_occ, eps_unocc, order=order, tol=tol)
-            self._shakeup_cache[key] = (Ha * delta_e, weight, orders)
+            sticks_by_order, _ = shakeup_sticks_by_order(K, eps_occ, eps_unocc, order=order, tol=tol)
+            self._shakeup_cache_by_order[key] = {
+                k: (Ha * e, w) for k, (e, w) in sticks_by_order.items()
+            }
+
+        return self._shakeup_cache_by_order[key]
+
+    def _shakeup_sticks(self, order, channel, tol):
+        """Cached (delta_e_ev, weight, orders_included) for one spin channel.
+        `channel=None` defaults to the excited channel; an explicit channel
+        is accepted so a future cross-spin feature can call this on the
+        other channel without a signature change.
+
+        Safe across transform(): that only rotates/permutes mo_coeff and
+        amplitude, never mb_overlap/mo_occ/mo_energy/core_orb_idx, so a
+        cache built before a transform() call stays valid after it."""
+        if channel is None:
+            channel = self._channel
+
+        if not hasattr(self, "_shakeup_cache"):
+            self._shakeup_cache = {}
+
+        key = (channel, order, tol)
+        if key not in self._shakeup_cache:
+            sticks_by_order = self._shakeup_sticks_by_order(order, channel, tol)
+            orders = sorted(sticks_by_order)
+            all_e = [sticks_by_order[k][0] for k in orders]
+            all_w = [sticks_by_order[k][1] for k in orders]
+            self._shakeup_cache[key] = (np.concatenate(all_e), np.concatenate(all_w), orders)
 
         return self._shakeup_cache[key]
 
+    def _spectator_shakeup_sticks(self, order, tol):
+        """Cached {order: (delta_e_ev, weight)} for the spectator
+        (non-excited) spin channel's own valence relaxation -- the
+        cross-spin contribution of mbxas-qe's spin_convolve_spectrum
+        (spec.f90). Same underlying persisted data as _shakeup_sticks
+        (mb_overlap/mo_occ/mo_energy for both channels), but built from
+        spectator_occ_unocc_indices since this channel keeps its full
+        ground-state occupation in the FCH step."""
+        from pymbxas.mbxas.mbxas import build_A_K, spectator_occ_unocc_indices
+        from pymbxas.mbxas.shakeup import shakeup_sticks_by_order
+
+        channel = 1 - self._channel
+
+        if not hasattr(self, "_spectator_shakeup_cache"):
+            self._spectator_shakeup_cache = {}
+
+        key = (order, tol)
+        if key not in self._spectator_shakeup_cache:
+            occ_idxs_gs, occ_idxs_fch, uno_idxs_fch = spectator_occ_unocc_indices(
+                self._gs_mo_occ[channel], self._mo_occ[channel])
+
+            _, _, K = build_A_K(self._mb_overlap[channel], occ_idxs_fch,
+                                occ_idxs_gs, uno_idxs_fch)
+
+            eps_occ   = self._fch_mo_energy[channel][occ_idxs_fch]
+            eps_unocc = self._fch_mo_energy[channel][uno_idxs_fch]
+
+            sticks_by_order, _ = shakeup_sticks_by_order(K, eps_occ, eps_unocc, order=order, tol=tol)
+            self._spectator_shakeup_cache[key] = {
+                k: (Ha * e, w) for k, (e, w) in sticks_by_order.items()
+            }
+
+        return self._spectator_shakeup_cache[key]
+
+    def _combined_shakeup_sticks(self, shakeup_order, spectator_order, max_total_order, tol, shakedown_only):
+        """Resolve the (possibly cross-channel-combined, possibly
+        shakedown-filtered) shake-up sticks for this spectrum, in eV.
+
+        spectator_order=None takes the exact pre-cross-spin code path
+        (self._shakeup_sticks), so shakeup_order alone stays byte-identical
+        to before this feature existed. Otherwise, both channels' per-order
+        sticks are combined via mbxas.shakeup.combine_cross_channel_sticks,
+        physically treating the two spin channels' relaxations as
+        independent processes.
+        """
+        if spectator_order is None:
+            if shakeup_order is None:
+                return np.empty(0), np.empty(0)
+            delta_e, weight, _ = self._shakeup_sticks(shakeup_order, None, tol)
+        else:
+            from pymbxas.mbxas.shakeup import combine_cross_channel_sticks
+
+            sticks_a = {} if shakeup_order is None else self._shakeup_sticks_by_order(shakeup_order, None, tol)
+            sticks_b = self._spectator_shakeup_sticks(spectator_order, tol)
+
+            if max_total_order is None:
+                max_total_order = (max(sticks_a) if sticks_a else 0) + max(sticks_b)
+
+            delta_e, weight = combine_cross_channel_sticks(sticks_a, sticks_b, max_total_order)
+
+        if shakedown_only:
+            mask = delta_e < 0
+            delta_e, weight = delta_e[mask], weight[mask]
+
+        return delta_e, weight
+
     def get_shakeup_spectrum(self, order="auto", channel=None, sigma=0.5,
-                              npoints=3001, erange=None, tol=0.01):
+                              npoints=3001, erange=None, tol=0.01,
+                              spectator_order=None, max_total_order=None,
+                              shakedown_only=False):
         """Broadened valence shake-up probability spectrum P(dE), the
         f^(n) terms beyond the one-body truncation (see dev/method.md).
         Convolve this onto a main spectrum's own grid with
         pymbxas.mbxas.shakeup.convolve_shakeup, or use
-        get_mbxas_spectra(shakeup_order=...) to do that automatically."""
+        get_mbxas_spectra(shakeup_order=...) to do that automatically.
+
+        spectator_order, max_total_order, shakedown_only: combine with the
+        spectator (non-excited) channel's own shake-up -- only valid with
+        the default channel=None (the excited channel), since the
+        combination fixes both channels' identity itself. When any of
+        these three is used, the third return value (orders_included) is
+        None instead of a list: a cross-channel or shakedown-filtered
+        result has no single per-channel order list to report.
+        """
         from pymbxas.mbxas.shakeup import broaden_shakeup
 
-        delta_e_ev, weight, orders = self._shakeup_sticks(order, channel, tol)
+        if spectator_order is not None and channel is not None:
+            raise ValueError(
+                "spectator_order combines the excited channel with the "
+                "spectator channel; pass channel=None (the default) "
+                "rather than an explicit channel."
+            )
+
+        if spectator_order is None and max_total_order is None and not shakedown_only:
+            delta_e_ev, weight, orders = self._shakeup_sticks(order, channel, tol)
+        else:
+            delta_e_ev, weight = self._combined_shakeup_sticks(
+                order, spectator_order, max_total_order, tol, shakedown_only)
+            orders = None
 
         if erange is None:
             # widen on both sides, never narrower than +-5*sigma around the
