@@ -224,6 +224,19 @@ def convolve_shakeup(egrid, main_intensity, delta_e, weight, sigma):
 
     de = egrid[1] - egrid[0]
 
+    # A stick whose |delta_e| exceeds the main spectrum's own span plus a
+    # broadening margin shifts the entire main spectrum off this egrid, so
+    # it cannot contribute anything above Gaussian-tail precision to the
+    # sliced output below -- drop it before sizing the kernel. Without this,
+    # a spectator-channel or cross-channel combination reaching into the
+    # diffuse, no-core-hole virtual manifold (delta_e up to hundreds of eV)
+    # blows up n_half and the dense (n_kgrid, n_sticks) broadcast inside
+    # broadened_spectrum to tens of GB for a system with a handful of orbitals.
+    relevant_bound = (egrid[-1] - egrid[0]) + 5 * sigma
+    if len(delta_e):
+        relevant = np.abs(delta_e) <= relevant_bound
+        delta_e, weight = delta_e[relevant], weight[relevant]
+
     stick_extent = np.abs(delta_e).max() if len(delta_e) else 0.0
     half_width = stick_extent + 5 * sigma
     n_half = int(np.ceil(half_width / de))

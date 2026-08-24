@@ -50,3 +50,4 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Batch runs no longer default to requesting a GPU
 - Fixed `gpu=True` having no effect; GPU calculations previously ran on the CPU or crashed
 - Passing an unknown keyword to the calculator builder now raises instead of being ignored
+- Fixed shake-up convolution using tens of GB of memory when combining with a spectator channel reaching high-lying diffuse virtuals
