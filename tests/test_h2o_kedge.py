@@ -23,7 +23,8 @@ def test_h2o_oxygen_kedge(tmp_path):
         dft_verbose=0,
         dft_output=False,
         save=False,
-        target_dir=str(tmp_path)
+        target_dir=str(tmp_path),
+        gpu=True,
     )
 
     obj.kernel("O")
@@ -67,7 +68,9 @@ def test_h2o_oxygen_kedge(tmp_path):
     assert A.shape[0] == A.shape[1], f"Matrix A not square: {A.shape}"
 
     det_A = np.linalg.det(A)
-    assert abs(det_A - 0.9486) < 0.05, f"det(A) = {det_A:.4f}, expected ~0.9486"
+    # Orbital sign is gauge-arbitrary (CPU and GPU eigensolvers can pick
+    # opposite signs for the same MO), so only |det(A)| is a real invariant.
+    assert abs(abs(det_A) - 0.9486) < 0.05, f"|det(A)| = {abs(det_A):.4f}, expected ~0.9486"
 
     cond_A = np.linalg.cond(A)
     assert cond_A < 2, f"Matrix A ill-conditioned: cond(A) = {cond_A:.3f} > 2"
