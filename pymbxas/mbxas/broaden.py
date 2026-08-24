@@ -13,15 +13,58 @@ import numpy as np
 def gaussian_broadening(x, sigma):
     return np.exp(-0.5*(x/sigma)**2) / (sigma * np.sqrt(2 * np.pi))
 
-def broadened_spectrum(egrid, energies, intensities, sigma):
-    x_shifted = egrid[:, np.newaxis] - energies  # (npoints, M)
-    gauss = gaussian_broadening(x_shifted, sigma)  # (npoints, M)
-    if intensities.ndim == 1:
-        # intensities: (M,) -> spectra: (npoints,)
-        return np.sum(intensities * gauss, axis=1)
-    else:
-        # intensities: (naxes, M) -> spectra: (naxes, npoints)
-        return np.sum(intensities[:, np.newaxis, :] * gauss[np.newaxis, :, :], axis=2)
+def broadened_spectrum(egrid, energies, intensities, sigma, nsigma=6):
+    """Sum of Gaussians of width sigma, one per (energy, intensity) stick,
+    sampled on egrid. Each stick's support is truncated at nsigma*sigma
+    (mbxas-qe's spec.f90:stick_to_spec uses the same nsigma=6 truncation)
+    and scatter-added onto egrid, rather than densely broadcasting every
+    stick against every grid point: for shake-up stick combinatorics
+    (e.g. cross-channel order-2 on a many-orbital real molecule, which
+    can reach millions of sticks) a dense (npoints, M) array is tens to
+    hundreds of GB, while the truncated form is (M, W) with W independent
+    of npoints. Requires egrid to be uniformly spaced; falls back to the
+    dense form otherwise (only the small, non-shake-up main-spectrum path
+    calls this with a non-uniform egrid).
+    """
+    egrid = np.asarray(egrid)
+    energies = np.asarray(energies)
+    intensities = np.asarray(intensities)
+    is_1d = intensities.ndim == 1
+    npoints, M = egrid.shape[0], energies.shape[0]
+
+    out = np.zeros(npoints) if is_1d else np.zeros((intensities.shape[0], npoints))
+    if M == 0:
+        return out
+
+    de = egrid[1] - egrid[0] if npoints > 1 else 0.0
+    uniform = npoints > 1 and np.allclose(np.diff(egrid), de, rtol=1e-8, atol=1e-12)
+    if not uniform:
+        x_shifted = egrid[:, np.newaxis] - energies  # (npoints, M)
+        gauss = gaussian_broadening(x_shifted, sigma)  # (npoints, M)
+        if is_1d:
+            return gauss @ intensities
+        return np.einsum("ac,pc->ap", intensities, gauss)
+
+    half_window = max(1, int(np.ceil(nsigma * sigma / abs(de))))
+    offsets = np.arange(-half_window, half_window + 1)  # (W,)
+
+    i0 = np.round((energies - egrid[0]) / de).astype(np.int64)
+    idx = i0[:, None] + offsets[None, :]  # (M, W)
+    valid = (idx >= 0) & (idx < npoints)
+    idx = np.clip(idx, 0, npoints - 1)
+
+    gauss = gaussian_broadening(egrid[idx] - energies[:, None], sigma)  # (M, W)
+    gauss = np.where(valid, gauss, 0.0)
+    idx_flat = idx.ravel()
+
+    if is_1d:
+        contrib = (intensities[:, None] * gauss).ravel()
+        return np.bincount(idx_flat, weights=contrib, minlength=npoints)
+
+    for a in range(intensities.shape[0]):
+        contrib = (intensities[a][:, None] * gauss).ravel()
+        out[a] = np.bincount(idx_flat, weights=contrib, minlength=npoints)
+    return out
 
 def get_mbxas_spectra(energies, intensities, sigma=0.5, npoints=3001, tol=0.01, erange=None):
     """

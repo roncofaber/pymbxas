@@ -51,3 +51,4 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Fixed `gpu=True` having no effect; GPU calculations previously ran on the CPU or crashed
 - Passing an unknown keyword to the calculator builder now raises instead of being ignored
 - Fixed shake-up convolution using tens of GB of memory when combining with a spectator channel reaching high-lying diffuse virtuals
+- Fixed spectral broadening exhausting memory for spectra built from millions of shake-up sticks
