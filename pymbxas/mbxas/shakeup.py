@@ -140,6 +140,62 @@ def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_on
     return np.concatenate(all_e), np.concatenate(all_w), orders_included
 
 
+def combine_cross_channel_sticks(sticks_a_by_order, sticks_b_by_order, max_total_order):
+    """Cross-channel shake-up combination.
+
+    Physically, the excited channel's own valence relaxation and the
+    spectator channel's own valence relaxation are treated as independent
+    processes (sudden-approximation factorization, mbxas-qe's
+    spin_convolve_spectrum in spec.f90): the joint probability of an
+    order-i excited-channel combination together with an order-j
+    spectator-channel combination is the product of the two probabilities,
+    and the joint electron-hole energy cost is their sum. In stick form
+    that is exactly the outer product of weights and outer sum of energies:
+
+        E_ij = e_i[:, None] + e_j[None, :]
+        W_ij = w_i[:, None] * w_j[None, :]
+
+    sticks_a_by_order, sticks_b_by_order: {order: (delta_e, weight)} as
+    returned by shakeup_sticks_by_order. Order 0 ("no extra excitation in
+    this channel") is implicit -- a trivial (delta_e=0, weight=1) stick --
+    and does not need to be a key in either dict.
+
+    max_total_order: only (i, j) pairs with i + j <= max_total_order
+    contribute. Includes the "pure" terms (i, 0) and (0, j), which reduce
+    to that channel's own sticks unchanged (outer sum/product with the
+    trivial stick is the identity) -- so if sticks_b_by_order is empty,
+    the result is exactly the concatenation of sticks_a_by_order's entries,
+    i.e. plain single-channel shake-up.
+
+    Returns (delta_e, weight): concatenated sticks for every included
+    (i, j) pair except the trivial (0, 0) "no shake-up anywhere" term --
+    broaden_shakeup/convolve_shakeup already add that term themselves.
+    """
+    trivial_e, trivial_w = np.array([0.0]), np.array([1.0])
+
+    def _get(sticks_by_order, k):
+        return sticks_by_order[k] if k else (trivial_e, trivial_w)
+
+    orders_a = [0] + sorted(sticks_a_by_order)
+    orders_b = [0] + sorted(sticks_b_by_order)
+
+    all_e, all_w = [], []
+    for i in orders_a:
+        for j in orders_b:
+            if i == 0 and j == 0:
+                continue
+            if i + j > max_total_order:
+                continue
+            e_i, w_i = _get(sticks_a_by_order, i)
+            e_j, w_j = _get(sticks_b_by_order, j)
+            all_e.append((e_i[:, None] + e_j[None, :]).ravel())
+            all_w.append((w_i[:, None] * w_j[None, :]).ravel())
+
+    if not all_e:
+        return np.empty(0), np.empty(0)
+    return np.concatenate(all_e), np.concatenate(all_w)
+
+
 def broaden_shakeup(delta_e, weight, egrid, sigma):
     """Broaden shake-up sticks onto egrid, including the implicit n=0
     (no extra shake-up) term at delta_e=0 with unit weight -- this is what

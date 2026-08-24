@@ -253,6 +253,30 @@ def test_h2o_oxygen_kedge(tmp_path):
     assert np.array_equal(np.sort(sticks_by_order_down[1][0]), np.sort(e1_down)), \
         "shakeup_sticks_by_order should forward shakedown_only to shakeup_sticks"
 
+    from pymbxas.mbxas.shakeup import combine_cross_channel_sticks
+
+    sticks_a = {1: (np.array([1.0, 2.0]), np.array([0.1, 0.2]))}
+    sticks_b = {1: (np.array([3.0]), np.array([0.4]))}
+    de_cross, dw_cross = combine_cross_channel_sticks(sticks_a, sticks_b, max_total_order=2)
+    expected_e = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    expected_w = np.array([0.1, 0.2, 0.4, 0.04, 0.08])
+    assert np.array_equal(np.sort(de_cross), np.sort(expected_e)), \
+        f"combine_cross_channel_sticks energies mismatch: {sorted(de_cross)} vs {sorted(expected_e)}"
+    assert np.allclose(np.sort(dw_cross), np.sort(expected_w), atol=1e-15), \
+        f"combine_cross_channel_sticks weights mismatch: {sorted(dw_cross)} vs {sorted(expected_w)}"
+
+    de_cap1, dw_cap1 = combine_cross_channel_sticks(sticks_a, sticks_b, max_total_order=1)
+    assert len(de_cap1) == 3, \
+        f"max_total_order=1 should keep 3 sticks (2 pure-a + 1 pure-b, dropping the (1,1) cross term), got {len(de_cap1)}"
+
+    de_solo, dw_solo = combine_cross_channel_sticks(sticks_a, {}, max_total_order=1)
+    assert np.array_equal(de_solo, sticks_a[1][0]) and np.array_equal(dw_solo, sticks_a[1][1]), \
+        "combine_cross_channel_sticks with an empty spectator dict should reduce to the excited channel's own sticks"
+
+    de_empty, dw_empty = combine_cross_channel_sticks({}, {}, max_total_order=0)
+    assert len(de_empty) == 0 and len(dw_empty) == 0, \
+        "combine_cross_channel_sticks with both dicts empty should return empty arrays"
+
     from pymbxas.mbxas.shakeup import broaden_shakeup, convolve_shakeup
 
     # broaden_shakeup with empty sticks reduces to a single normalized
