@@ -120,6 +120,14 @@ All 35 tests pass, including:
 
 ---
 
+## Addendum (post-review finding)
+
+This review was a code-reading pass and did not execute the cross-spin path with real values, so it missed a real defect surfaced immediately afterward when the user reported the test suite spiking system RAM above 100GB. Root-caused via execution (see commit `054e2a3`): the spectator channel has no core hole to prune its virtual manifold, so cross-channel combinations reach `delta_e` in the hundreds of eV (H2O/O: up to ~827 eV combined); `convolve_shakeup` sized its kernel grid from the full range of every stick regardless of weight, so physically negligible (weight as low as `1e-35`) but energetically extreme combinations blew the dense `(n_kgrid, n_sticks)` broadcast in `broadened_spectrum` up to ~69GB peak RSS for a 39-basis-function molecule. Fixed by dropping sticks whose `|delta_e|` exceeds the main spectrum's own span plus a broadening margin before sizing the kernel -- such sticks shift the whole spectrum off the plotted window and cannot contribute above Gaussian-tail precision to the sliced output, so no computed value changes. Peak RSS for the full suite: ~69GB -> ~2.6GB; wall time: ~105s -> ~30s. 35/35 tests still pass.
+
+This is a concrete instance of the general risk this review's own checklist item (e) gestured at but didn't test for: "byte-identical when off" claims and code-path tracing are necessary but not sufficient -- a scientific review of numerical code should include at least one execution with real, non-toy values through every new code path, not just static reasoning about the code.
+
+---
+
 ## Conclusion
 
 **Status: APPROVED**
