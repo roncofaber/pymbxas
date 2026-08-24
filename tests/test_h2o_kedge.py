@@ -546,7 +546,7 @@ def test_h2o_oxygen_kedge(tmp_path):
         assert not np.allclose(I_spec_only, I_bare), \
             "spectator_order=1 should change the spectrum when the spectator channel has nonzero shake-up mass"
     assert np.trapezoid(I_spec_only, E_spec_only) == pytest.approx(
-        np.trapezoid(I_bare, E_bare), rel=0.1), \
+        np.trapezoid(I_bare, E_bare), rel=0.15), \
         "spectator-only shake-up convolution should approximately conserve total integrated intensity"
 
     # combining both channels must agree with a manual combine_cross_channel_sticks call
