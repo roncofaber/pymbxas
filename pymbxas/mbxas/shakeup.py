@@ -24,7 +24,7 @@ MAX_IMPLEMENTED_ORDER = 2
 logger = logging.getLogger(__name__)
 
 
-def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False):
+def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False, tol=0.01):
     """Order-k valence shake-up stick spectrum.
 
     K: (n_unocc, n_occ) matrix for one spin channel (mbxas.mbxas.build_A_K).
@@ -36,10 +36,12 @@ def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False):
         (kpoint_spectral_details.f90: shakedown = any(de < 0)). A
         diagnostic isolation of the sign-anomalous combinations, not a
         different formula.
+    tol: only used for order == 2, see _shakeup_sticks_order2.
 
     Returns (delta_e, weight): flat 1D arrays, one entry per combination of
     `order` valence orbitals promoted to `order` conduction orbitals.
-    weight = |det(K[c_combo, v_combo])|**2.
+    weight = |det(K[c_combo, v_combo])|**2. For order == 2 this is not
+    every combination -- see _shakeup_sticks_order2.
     """
     if order < 1:
         raise ValueError(f"order must be >= 1, got {order}")
@@ -49,7 +51,7 @@ def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False):
             f"{order}-fold valence/conduction combinations grows as "
             f"O(n_occ**{order} * n_unocc**{order}), and nothing here prunes "
             "that combinatorics the way mbxas-qe's adaptive-tolerance "
-            "doubles_overlap/triples_overlap do. Implemented orders: 1-"
+            "triples_overlap does. Implemented orders: 1-"
             f"{MAX_IMPLEMENTED_ORDER}."
         )
 
@@ -57,6 +59,13 @@ def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False):
     n_unocc = len(eps_unocc)
     if order > n_occ or order > n_unocc:
         return np.empty(0), np.empty(0)
+
+    if order == 2:
+        delta_e, weight = _shakeup_sticks_order2(K, eps_occ, eps_unocc, tol)
+        if shakedown_only:
+            mask = delta_e < 0
+            delta_e, weight = delta_e[mask], weight[mask]
+        return delta_e, weight
 
     v_combos = np.array(list(itertools.combinations(range(n_occ), order)))
     c_combos = np.array(list(itertools.combinations(range(n_unocc), order)))
@@ -78,6 +87,90 @@ def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False):
     return delta_e, weight
 
 
+def _shakeup_sticks_order2(K, eps_occ, eps_unocc, tol):
+    """Order-2 valence shake-up sticks, pruned by |K|**2 magnitude.
+
+    The brute-force route (all C(n_occ, 2) valence pairs times all
+    C(n_unocc, 2) conduction pairs) enumerates every 2x2 minor of K
+    regardless of size, which is what actually explodes for real systems
+    (147M sticks for a modest active space) -- most valence electrons
+    barely relax when a core hole forms, so almost all of those minors are
+    negligible. This mirrors what mbxas-qe's doubles_overlap
+    (SHIRLEY/src/mbxas_spectra.f90) does instead: treat every single
+    valence->conduction transition (v, c) as one candidate ranked by
+    |K(c, v)|**2, and only form 2x2 minors between candidates that are
+    both large. Concretely: sort all n_occ*n_unocc singles by |K|**2
+    descending, then iteratively grow an "active" prefix of that list
+    (geometric growth stands in for QE's shrinking-tolerance schedule --
+    both just mean "look at progressively smaller matrix elements"),
+    forming all valid pairs (distinct v, distinct c) within the active set
+    each round, until the accumulated order-2 weight stops changing by
+    more than tol relative to the order-1 mass -- the same mass-based
+    convergence convention shakeup_sticks_by_order's "auto" order already
+    uses. If K has no sparsity at all, the active set grows to cover every
+    singles pair and this costs the same as brute force; that is a
+    property of K, not something pruning can fix.
+    """
+    n_occ = len(eps_occ)
+    n_unocc = len(eps_unocc)
+    n_singles = n_occ * n_unocc
+    if n_occ < 2 or n_unocc < 2:
+        return np.empty(0), np.empty(0)
+
+    c_idx = np.repeat(np.arange(n_unocc), n_occ)
+    v_idx = np.tile(np.arange(n_occ), n_unocc)
+    k1 = K.ravel()
+    importance = np.abs(k1) ** 2
+    mass1 = importance.sum()
+    if mass1 == 0:
+        return np.empty(0), np.empty(0)
+    delta_e1 = eps_unocc[c_idx] - eps_occ[v_idx]
+
+    rank = np.argsort(-importance)
+    v_s, c_s, k_s, de_s = v_idx[rank], c_idx[rank], k1[rank], delta_e1[rank]
+
+    delta_e = weight = np.empty(0)
+    prev_mass = 0.0
+    m = min(64, n_singles)
+    while True:
+        v_a, c_a, k_a, de_a = v_s[:m], c_s[:m], k_s[:m], de_s[:m]
+
+        # Each {v,v'}x{c,c'} quartet appears twice among distinct-v,
+        # distinct-c singles pairs -- once as (v,c)&(v',c'), once as
+        # (v,c')&(v',c) -- and both give the same |2x2 minor|**2. Keep
+        # only the "concordant" matching (smaller v paired with smaller c)
+        # to count each combo once.
+        i, j = np.triu_indices(m, k=1)
+        keep = (v_a[i] != v_a[j]) & (c_a[i] != c_a[j]) \
+            & ((v_a[i].astype(np.int64) - v_a[j]) * (c_a[i].astype(np.int64) - c_a[j]) > 0)
+        i, j = i[keep], j[keep]
+
+        diag = k_a[i] * k_a[j]
+        cross = K[c_a[j], v_a[i]] * K[c_a[i], v_a[j]]
+        weight = np.abs(diag - cross) ** 2
+        delta_e = de_a[i] + de_a[j]
+
+        mass = weight.sum()
+        converged = m >= n_singles or (mass > 0 and abs(mass - prev_mass) < tol * max(mass1, mass))
+        logger.log(TRACE,
+            "shake-up order-2 pruning: active singles=%d/%d pairs=%d "
+            "mass=%.6e (order-1 mass=%.6e, tol=%.3g) -> %s",
+            m, n_singles, len(weight), mass, mass1, tol,
+            "converged" if converged else "widening")
+        if converged:
+            break
+        prev_mass = mass
+        m = min(m * 4, n_singles)
+
+    if m > 256:
+        logger.warning(
+            "shake-up order-2 pruning needed an active set of %d/%d "
+            "singles to converge (tol=%.3g) -- K is not very sparse here, "
+            "so this is close to the brute-force cost.", m, n_singles, tol)
+
+    return delta_e, weight
+
+
 def shakeup_sticks_by_order(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):
     """Per-order valence shake-up sticks, order 1 up to the requested order.
 
@@ -88,14 +181,14 @@ def shakeup_sticks_by_order(K, eps_occ, eps_unocc, order="auto", tol=0.01, shake
     shakeup_spectrum concatenates this into its flat (delta_e, weight)
     contract for callers that don't need the breakdown.
     """
-    e1, w1 = shakeup_sticks(K, eps_occ, eps_unocc, 1, shakedown_only=shakedown_only)
+    e1, w1 = shakeup_sticks(K, eps_occ, eps_unocc, 1, shakedown_only=shakedown_only, tol=tol)
     mass1 = w1.sum()
     sticks_by_order = {1: (e1, w1)}
     orders_included = [1]
 
     if order == "auto":
         for k in range(2, MAX_IMPLEMENTED_ORDER + 1):
-            ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only)
+            ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only, tol=tol)
             massk = wk.sum()
             include = mass1 > 0 and massk > tol * mass1
             logger.log(TRACE,
@@ -112,7 +205,7 @@ def shakeup_sticks_by_order(K, eps_occ, eps_unocc, order="auto", tol=0.01, shake
     if order < 1:
         raise ValueError(f"order must be >= 1 or 'auto', got {order}")
     for k in range(2, order + 1):
-        ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only)
+        ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only, tol=tol)
         sticks_by_order[k] = (ek, wk)
         orders_included.append(k)
     return sticks_by_order, orders_included
@@ -140,7 +233,45 @@ def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_on
     return np.concatenate(all_e), np.concatenate(all_w), orders_included
 
 
-def combine_cross_channel_sticks(sticks_a_by_order, sticks_b_by_order, max_total_order):
+def _prune_outer_product(e_i, w_i, e_j, w_j, tol):
+    """Weight-pruned outer sum/product of two independent stick lists.
+
+    A plain outer join (e_i[:, None] + e_j[None, :], w_i[:, None] * w_j[None, :])
+    is what actually overflows memory once both channels' order-1 stick
+    counts (each just n_occ*n_unocc, not itself a combinatorial blow-up)
+    reach the tens of thousands -- their cross product alone lands in the
+    hundreds of millions. Unlike _shakeup_sticks_order2, here the two
+    lists are independent (no shared-index double counting), and the true
+    total mass sum(w_i)*sum(w_j) is known exactly without doing the join.
+    So: sort each list by weight descending, grow active prefixes of both
+    geometrically, and stop as soon as the join restricted to those
+    prefixes has captured a (1 - tol) fraction of the exact total -- every
+    excluded product is <= the smallest included one, so this can't
+    over-converge.
+    """
+    if len(w_i) == 0 or len(w_j) == 0:
+        return np.empty(0), np.empty(0)
+    total_mass = w_i.sum() * w_j.sum()
+    if total_mass == 0:
+        return np.empty(0), np.empty(0)
+
+    ri, rj = np.argsort(-w_i), np.argsort(-w_j)
+    e_i_s, w_i_s = e_i[ri], w_i[ri]
+    e_j_s, w_j_s = e_j[rj], w_j[rj]
+    ni, nj = len(w_i), len(w_j)
+
+    mi, mj = min(64, ni), min(64, nj)
+    while True:
+        e_sub = (e_i_s[:mi, None] + e_j_s[None, :mj]).ravel()
+        w_sub = (w_i_s[:mi, None] * w_j_s[None, :mj]).ravel()
+        captured = w_sub.sum()
+        if (mi >= ni and mj >= nj) or captured >= (1 - tol) * total_mass:
+            break
+        mi, mj = min(mi * 4, ni), min(mj * 4, nj)
+    return e_sub, w_sub
+
+
+def combine_cross_channel_sticks(sticks_a_by_order, sticks_b_by_order, max_total_order, tol=0.01):
     """Cross-channel shake-up combination.
 
     Physically, the excited channel's own valence relaxation and the
@@ -167,6 +298,13 @@ def combine_cross_channel_sticks(sticks_a_by_order, sticks_b_by_order, max_total
     the result is exactly the concatenation of sticks_a_by_order's entries,
     i.e. plain single-channel shake-up.
 
+    tol: each (i, j) block's outer join is pruned by weight magnitude
+    (_prune_outer_product) rather than formed in full -- a single order-1
+    x order-1 join between two channels is already n_occ*n_unocc large on
+    each side, so a plain outer product is the thing that actually
+    exhausts memory. Kept to a (1 - tol) fraction of that block's exact
+    mass, same convention as shakeup_sticks_by_order's tol.
+
     Returns (delta_e, weight): concatenated sticks for every included
     (i, j) pair except the trivial (0, 0) "no shake-up anywhere" term --
     broaden_shakeup/convolve_shakeup already add that term themselves.
@@ -188,8 +326,9 @@ def combine_cross_channel_sticks(sticks_a_by_order, sticks_b_by_order, max_total
                 continue
             e_i, w_i = _get(sticks_a_by_order, i)
             e_j, w_j = _get(sticks_b_by_order, j)
-            all_e.append((e_i[:, None] + e_j[None, :]).ravel())
-            all_w.append((w_i[:, None] * w_j[None, :]).ravel())
+            e_ij, w_ij = _prune_outer_product(e_i, w_i, e_j, w_j, tol)
+            all_e.append(e_ij)
+            all_w.append(w_ij)
 
     if not all_e:
         return np.empty(0), np.empty(0)

@@ -270,7 +270,8 @@ def test_h2o_oxygen_kedge(tmp_path):
         f"max_total_order=1 should keep 3 sticks (2 pure-a + 1 pure-b, dropping the (1,1) cross term), got {len(de_cap1)}"
 
     de_solo, dw_solo = combine_cross_channel_sticks(sticks_a, {}, max_total_order=1)
-    assert np.array_equal(de_solo, sticks_a[1][0]) and np.array_equal(dw_solo, sticks_a[1][1]), \
+    assert np.array_equal(np.sort(de_solo), np.sort(sticks_a[1][0])) \
+        and np.array_equal(np.sort(dw_solo), np.sort(sticks_a[1][1])), \
         "combine_cross_channel_sticks with an empty spectator dict should reduce to the excited channel's own sticks"
 
     de_empty, dw_empty = combine_cross_channel_sticks({}, {}, max_total_order=0)

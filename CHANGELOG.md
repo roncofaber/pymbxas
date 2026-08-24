@@ -31,6 +31,7 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Minimum supported Python is now declared as 3.9
 - Calculations and spectra are now saved as HDF5 files, and `.pkl` files can no longer be loaded
 - Reloading a calculation no longer reads orbital coefficients until they are used
+- Order-2 and cross-channel shake-up weights are now approximated to within `tol` instead of enumerated exactly
 
 ### Fixed
 - Verbosity level 5 now logs more detail than level 4, instead of the two being identical
@@ -52,3 +53,4 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Passing an unknown keyword to the calculator builder now raises instead of being ignored
 - Fixed shake-up convolution using tens of GB of memory when combining with a spectator channel reaching high-lying diffuse virtuals
 - Fixed spectral broadening exhausting memory for spectra built from millions of shake-up sticks
+- Fixed order-2 and cross-channel shake-up spectra crashing with an out-of-memory error for larger active spaces

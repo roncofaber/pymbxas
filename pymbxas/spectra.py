@@ -469,7 +469,7 @@ class Spectra():
             if max_total_order is None:
                 max_total_order = (max(sticks_a) if sticks_a else 0) + max(sticks_b)
 
-            delta_e, weight = combine_cross_channel_sticks(sticks_a, sticks_b, max_total_order)
+            delta_e, weight = combine_cross_channel_sticks(sticks_a, sticks_b, max_total_order, tol=tol)
 
         if shakedown_only:
             mask = delta_e < 0
