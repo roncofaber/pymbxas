@@ -8,6 +8,9 @@ Created on Wed Aug  2 18:12:42 2023
 
 import os
 import glob
+import logging
+
+logger = logging.getLogger(__name__)
 
 #%%
 
@@ -20,7 +23,8 @@ def remove_tmp_files(current_directory):
         if os.path.isfile(file):
             try:
                 os.remove(file)
-            except OSError:
-                pass
+                logger.debug("Removed temporary file: %s", file)
+            except OSError as e:
+                logger.warning("Failed to remove temporary file %s: %s", file, e)
 
     return

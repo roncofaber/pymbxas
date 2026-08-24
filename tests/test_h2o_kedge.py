@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pytest
 import ase.build
@@ -102,6 +104,29 @@ def test_h2o_oxygen_kedge(tmp_path):
     virtual_diff = np.max(np.abs(virtual_block_orig - virtual_block_trans))
     # Origin independence holds because both orbitals come from the same FCH calculation.
     assert virtual_diff < 1e-10, f"Virtual dipoles changed under translation: {virtual_diff:.2e}, expected < 1e-10"
+
+    # ase_to_mole must warn when it forwards an unrecognized kwarg to
+    # gto.Mole -- attach a handler directly to the module logger rather
+    # than relying on propagation to a root-attached capture handler,
+    # since configure_logger() sets propagate=False on the "pymbxas" logger
+    class _RecordCollector(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+        def emit(self, record):
+            self.records.append(record)
+
+    collector = _RecordCollector()
+    structure_logger = logging.getLogger("pymbxas.build.structure")
+    structure_logger.addHandler(collector)
+    structure_logger.setLevel(logging.WARNING)
+    try:
+        ase_to_mole(st2, 0, 0, basis="def2-svpd", pbc=False, verbose=0,
+                    print_output=False, this_kwarg_does_not_exist=True)
+    finally:
+        structure_logger.removeHandler(collector)
+    assert any("forwarding unrecognized keyword" in r.getMessage() for r in collector.records), \
+        "ase_to_mole should warn when forwarding an unrecognized kwarg to gto.Mole"
 
     E, I = obj.get_mbxas_spectra("O", erange=[520, 560], sigma=0.5)
 
@@ -232,6 +257,40 @@ def test_h2o_oxygen_kedge(tmp_path):
     assert mass_near_satellite > 0.3 * mass_near_peak, \
         "equal-weight single shake-up stick should move a comparable amount of intensity to the satellite"
 
+    from pymbxas.mbxas.mbxas import occ_unocc_indices
+
+    # occ_unocc_indices must reproduce the same three index arrays already
+    # computed by hand at the top of this test
+    occ_gs_h, occ_fch_h, uno_fch_h = occ_unocc_indices(gs.mo_occ[ch], fch.mo_occ[ch], exc.orb_idx)
+    assert np.array_equal(occ_gs_h, occ_gs), "occ_unocc_indices GS occupied indices mismatch"
+    assert np.array_equal(occ_fch_h, occ_fch), "occ_unocc_indices FCH occupied indices mismatch"
+    assert np.array_equal(uno_fch_h, uno_fch), "occ_unocc_indices FCH unoccupied indices mismatch"
+
+    # get_shakeup_spectrum's default erange must widen on the negative side
+    # too, not just the positive one -- a negative shake-up stick is
+    # possible for a non-aufbau MOM-converged state, not exercised by
+    # H2O/O itself, so seed the cache directly with a synthetic one and
+    # confirm the real method's erange logic covers it
+    if not hasattr(spectra_fields, "_shakeup_cache"):
+        spectra_fields._shakeup_cache = {}
+    synth_key = (spectra_fields._channel, "synthetic_negative_test", 0.01)
+    spectra_fields._shakeup_cache[synth_key] = (np.array([-30.0, 5.0]), np.array([0.5, 0.5]), [1])
+    E_synth, I_synth, _ = spectra_fields.get_shakeup_spectrum(order="synthetic_negative_test", sigma=0.5)
+    assert E_synth.min() < -30.0, \
+        f"erange should extend past the negative stick at -30 eV, got min {E_synth.min():.2f}"
+    assert E_synth.max() >= 5.0 + 5 * 0.5, \
+        f"erange should still extend past the positive stick, got max {E_synth.max():.2f}"
+
+    # verbosity level 5 must configure the pymbxas logger to a strictly
+    # more detailed level than 4 (previously both mapped to logging.DEBUG,
+    # making them indistinguishable)
+    from pymbxas.io.config import configure_logger, TRACE
+    assert TRACE < logging.DEBUG, f"TRACE ({TRACE}) should be below DEBUG ({logging.DEBUG})"
+    configure_logger(5)
+    assert logging.getLogger("pymbxas").level == TRACE, \
+        "verbosity level 5 should configure the pymbxas logger to TRACE, not DEBUG"
+    configure_logger(3)  # restore a normal level so later output isn't flooded
+
     h5_path = obj.save_object(oname="roundtrip.h5", save_path=str(tmp_path))
 
     from pyscf.scf import chkfile as pyscf_chkfile
@@ -350,3 +409,36 @@ def test_h2o_oxygen_kedge(tmp_path):
     E_pyscf_none, I_pyscf_none = obj.get_mbxas_spectra("O", erange=[520, 560], sigma=0.5)
     assert np.array_equal(E_pyscf_none, E) and np.allclose(I_pyscf_none, I, atol=1e-12), \
         "PySCF_mbxas.get_mbxas_spectra regression after wrapper refactor"
+
+    # get_shakeup_summary must agree with the already-tested individual
+    # get_mbxas_spectra/get_shakeup_spectrum calls above
+    summary = spectra_fields.get_shakeup_summary(order=2, sigma=0.5, erange=[520, 560])
+    assert set(summary["spectra"].keys()) == {0, 1, 2}, \
+        f"get_shakeup_summary should return spectra for orders 0,1,2, got {set(summary['spectra'].keys())}"
+    assert np.array_equal(summary["energy"], E_none), "get_shakeup_summary energy grid mismatch"
+    assert np.array_equal(summary["spectra"][0], I_none), "get_shakeup_summary order-0 (bare) spectrum mismatch"
+    assert np.array_equal(summary["spectra"][1], I_sk), "get_shakeup_summary order-1 spectrum mismatch"
+    assert summary["integrated"][0] == pytest.approx(np.trapezoid(I_none, E_none)), \
+        "get_shakeup_summary integrated intensity mismatch"
+    prob_e_summary, prob_curve_summary, prob_orders_summary = summary["probability"]
+    assert len(prob_e_summary) == len(prob_curve_summary)
+    assert prob_orders_summary in ([1], [1, 2])
+
+    # plot_shakeup_summary is a light smoke test (presentation, not a
+    # physics invariant): it should return the right number of Axes
+    # without raising, for both the one- and two-panel forms. Force a
+    # non-interactive backend first -- this test environment is headless,
+    # and a library module should not call matplotlib.use() itself (that
+    # is the calling application's decision, not pymbxas's).
+    import os
+    if not os.environ.get("DISPLAY"):
+        import matplotlib
+        matplotlib.use("Agg")
+    from pymbxas.plotting import plot_shakeup_summary
+    fig_both, axes_both = plot_shakeup_summary(summary, show_probability=True)
+    assert len(axes_both) == 2, "plot_shakeup_summary(show_probability=True) should return 2 axes"
+    fig_main, axes_main = plot_shakeup_summary(summary, show_probability=False)
+    assert len(axes_main) == 1, "plot_shakeup_summary(show_probability=False) should return 1 axis"
+    import matplotlib.pyplot as _plt
+    _plt.close(fig_both)
+    _plt.close(fig_main)

@@ -156,7 +156,7 @@ Two independent channels, which is deliberate.
 - **PySCF output** goes through `io/logger.py`'s `Logger`, assigned to `mol.stdout`. It tees to the terminal, to an in-memory `StringIO` (retrievable as `output` / `output["fch"]`), and optionally to a file. FCH and XCH build their `mol` with `append=True` because the ground-state `mol.stdout` is closed at the end of `run_ground_state`.
 - **PyMBXAS progress** goes through the standard `logging` module, configured by `io/config.py`.
 
-`dft_verbose` is PySCF's own 0-9 scale. `xas_verbose` is PyMBXAS's 1-5 scale, mapped in `configure_logger`.
+`dft_verbose` is PySCF's own 0-9 scale. `xas_verbose` is PyMBXAS's 1-5 scale, mapped in `configure_logger`: 1-4 map onto the standard `ERROR`/`WARNING`/`INFO`/`DEBUG` levels, 5 maps onto a custom `TRACE` level (`pymbxas.io.config.TRACE`, registered below `DEBUG`) for fine-grained numerical diagnostics too voluminous for routine `DEBUG` use, e.g. the shake-up `"auto"` order-selection reasoning in `mbxas.shakeup.shakeup_spectrum`.
 
 ## Secondary subsystems
 

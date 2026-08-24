@@ -6,6 +6,8 @@ Created on Thu Aug  3 15:29:31 2023
 @author: roncoroni
 """
 
+import logging
+
 import ase
 
 from pyscf import gto
@@ -15,12 +17,20 @@ from pymbxas.io.logger import Logger
 from pymbxas.utils.check_keywords import check_pbc
 from pymbxas.utils.auxiliary import get_available_memory
 
+logger = logging.getLogger(__name__)
+
 #%%
 
 # convert an ase Atoms object to a mole or cell object for pyscf
 def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
                 verbose=4, print_output=True, log_file=None, symmetry=False,
                 is_gpu=False, append=False, **kwargs):
+
+    if kwargs:
+        logger.warning(
+            "ase_to_mole: forwarding unrecognized keyword(s) %s to pyscf's "
+            "Mole/Cell constructor; anything it doesn't recognize is "
+            "silently dropped, not raised.", sorted(kwargs))
 
     # generate atom list to feed to object
     atom_list = []
@@ -33,10 +43,11 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
     if pbc is None:
         pbc = check_pbc(pbc, structure)
     
-    # Create Logger instance
-    logger = Logger(print_to_terminal=print_output, log_file=log_file,
+    # Create Logger instance (tees PySCF's own stdout, unrelated to the
+    # module-level `logger` above)
+    stdout_logger = Logger(print_to_terminal=print_output, log_file=log_file,
                     append=append)
-    
+
     # periodic system
     if pbc:
         mol = pgto.Cell(
@@ -45,13 +56,13 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
             charge = charge,
             spin = spin,
             verbose = verbose,
-            stdout = logger,
+            stdout = stdout_logger,
             a = structure.get_cell().array,
             ke_cutoff = 100.0,
             symmetry = symmetry,
             **kwargs
             )
-    
+
     # non periodic system
     else:
         mol = gto.Mole(
@@ -60,7 +71,7 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
             charge = charge,
             spin = spin,
             verbose = verbose,
-            stdout = logger,
+            stdout = stdout_logger,
             max_memory = get_available_memory(is_gpu),
             unit = 'Angstrom',
             symmetry = symmetry,

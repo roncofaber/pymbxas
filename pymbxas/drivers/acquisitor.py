@@ -51,10 +51,14 @@ def pyscf_acquire(structure, to_excite, **kwargs):
     params = defaults.copy()
     params.update(kwargs) # Update defaults with user-provided kwargs
 
+    formula = structure.get_chemical_formula()
+    logger.info("Starting PySCF calculation for %s (to_excite=%s)", formula, to_excite)
+
     try:
         obj = PySCF_mbxas(structure=structure, **params)
         obj.kernel(to_excite)
+        logger.info("Calculation succeeded for %s (to_excite=%s)", formula, to_excite)
         return obj.to_spectra()
-    except Exception as e:
-        logger.exception("Error during PySCF calculation")
+    except Exception:
+        logger.exception("PySCF calculation failed for %s (to_excite=%s)", formula, to_excite)
         return None

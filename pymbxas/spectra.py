@@ -352,8 +352,12 @@ class Spectra():
         """Cached (delta_e_ev, weight, orders_included) for one spin channel.
         `channel=None` defaults to the excited channel; an explicit channel
         is accepted so a future cross-spin feature can call this on the
-        other channel without a signature change."""
-        from pymbxas.mbxas.mbxas import build_A_K
+        other channel without a signature change.
+
+        Safe across transform(): that only rotates/permutes mo_coeff and
+        amplitude, never mb_overlap/mo_occ/mo_energy/core_orb_idx, so a
+        cache built before a transform() call stays valid after it."""
+        from pymbxas.mbxas.mbxas import build_A_K, occ_unocc_indices
         from pymbxas.mbxas.shakeup import shakeup_spectrum
 
         if channel is None:
@@ -364,10 +368,8 @@ class Spectra():
 
         key = (channel, order, tol)
         if key not in self._shakeup_cache:
-            occ_idxs_gs = np.setdiff1d(
-                np.where(self._gs_mo_occ[channel] == 1)[0], [self._core_orb_idx])
-            occ_idxs_fch = np.where(self._mo_occ[channel] == 1)[0]
-            uno_idxs_fch = np.where(self._mo_occ[channel] == 0)[0][1:]
+            occ_idxs_gs, occ_idxs_fch, uno_idxs_fch = occ_unocc_indices(
+                self._gs_mo_occ[channel], self._mo_occ[channel], self._core_orb_idx)
 
             _, _, K = build_A_K(self._mb_overlap[channel], occ_idxs_fch,
                                 occ_idxs_gs, uno_idxs_fch)
@@ -393,11 +395,56 @@ class Spectra():
         delta_e_ev, weight, orders = self._shakeup_sticks(order, channel, tol)
 
         if erange is None:
-            hi = (delta_e_ev.max() if len(delta_e_ev) else 0.0) + 5 * sigma
-            erange = [-5 * sigma, hi]
+            # widen on both sides, never narrower than +-5*sigma around the
+            # n=0 term -- delta_e_ev can be negative for a non-aufbau
+            # MOM-converged state, where a formally-unoccupied orbital sits
+            # below a formally-occupied one
+            if len(delta_e_ev):
+                lo = min(-5 * sigma, delta_e_ev.min() - 5 * sigma)
+                hi = max(5 * sigma, delta_e_ev.max() + 5 * sigma)
+            else:
+                lo, hi = -5 * sigma, 5 * sigma
+            erange = [lo, hi]
         egrid = np.linspace(erange[0], erange[1], npoints)
 
         return egrid, broaden_shakeup(delta_e_ev, weight, egrid, sigma), orders
+
+    def get_shakeup_summary(self, order=2, sigma=0.5, npoints=3001, erange=None, tol=0.01):
+        """Compare a spectrum with and without the shake-up correction, up
+        to and including the given order (both bare and every intermediate
+        order 1..order are included, plus the shake-up probability curve
+        itself). Returns a dict:
+
+            "energy"      : (npoints,) shared energy grid, eV
+            "spectra"     : {0: bare, 1: order-1, ..., order: order-1..order}
+            "integrated"  : {same keys} -> trapezoidal integral of each spectrum
+            "probability" : (delta_e, curve, orders_included) from
+                             get_shakeup_spectrum(order=order, sigma=sigma)
+
+        Data only, no plotting -- see dev/method.md for what the numbers mean.
+        """
+        spectra = {0: self.get_mbxas_spectra(sigma=sigma, npoints=npoints,
+                                             erange=erange, tol=tol)}
+        energy = spectra[0][0]
+        spectra[0] = spectra[0][1]
+
+        for k in range(1, order + 1):
+            _, intensity = self.get_mbxas_spectra(sigma=sigma, npoints=npoints,
+                                                   erange=[energy[0], energy[-1]],
+                                                   tol=tol, shakeup_order=k)
+            spectra[k] = intensity
+
+        integrated = {k: np.trapezoid(I, energy) for k, I in spectra.items()}
+
+        prob_e, prob_curve, prob_orders = self.get_shakeup_spectrum(
+            order=order, sigma=sigma, tol=tol)
+
+        return {
+            "energy": energy,
+            "spectra": spectra,
+            "integrated": integrated,
+            "probability": (prob_e, prob_curve, prob_orders),
+        }
 
     @property
     def _active_mo_occ(self):

@@ -13,10 +13,15 @@ docs/superpowers/specs/2026-08-21-shakeup-satellites-design.md.
 """
 
 import itertools
+import logging
 
 import numpy as np
 
+from pymbxas.io.config import TRACE
+
 MAX_IMPLEMENTED_ORDER = 2
+
+logger = logging.getLogger(__name__)
 
 
 def shakeup_sticks(K, eps_occ, eps_unocc, order):
@@ -66,9 +71,12 @@ def shakeup_sticks(K, eps_occ, eps_unocc, order):
 def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01):
     """Combined shake-up stick spectrum up to the requested order.
 
-    order: "auto" includes order 2 only if its total weight exceeds
-        tol * (order-1 total weight); an explicit int always includes every
-        order from 1 up to and including that int, no tolerance check.
+    order: "auto" adds each order from 2 up to MAX_IMPLEMENTED_ORDER only
+        while its total weight exceeds tol * (order-1 total weight),
+        stopping at the first order that fails -- so adding a higher
+        MAX_IMPLEMENTED_ORDER later extends "auto" automatically, no
+        separate rewrite needed here. An explicit int always includes
+        every order from 1 up to and including that int, no tolerance check.
 
     Returns (delta_e, weight, orders_included): concatenated sticks across
     all included orders, plus the sorted list of orders actually included.
@@ -77,11 +85,23 @@ def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01):
     mass1 = w1.sum()
 
     if order == "auto":
-        e2, w2 = shakeup_sticks(K, eps_occ, eps_unocc, 2)
-        mass2 = w2.sum()
-        if mass1 > 0 and mass2 > tol * mass1:
-            return np.concatenate([e1, e2]), np.concatenate([w1, w2]), [1, 2]
-        return e1, w1, [1]
+        all_e = [e1]
+        all_w = [w1]
+        orders_included = [1]
+        for k in range(2, MAX_IMPLEMENTED_ORDER + 1):
+            ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k)
+            massk = wk.sum()
+            include = mass1 > 0 and massk > tol * mass1
+            logger.log(TRACE,
+                "shake-up auto-order: order %d mass=%.6e (order-1 mass=%.6e, "
+                "tol=%.3g) -> %s", k, massk, mass1, tol,
+                "included" if include else "stopped")
+            if not include:
+                break
+            all_e.append(ek)
+            all_w.append(wk)
+            orders_included.append(k)
+        return np.concatenate(all_e), np.concatenate(all_w), orders_included
 
     order = int(order)
     if order < 1:

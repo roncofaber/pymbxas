@@ -10,6 +10,9 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Saved calculations can be reopened with `.load()` and continued without repeating the ground state
 - Saved calculations are readable by PySCF as chkfiles
 - `shakeup_order` on `get_mbxas_spectra` adds valence shake-up satellite intensity beyond the one-body truncation
+- `Spectra.get_shakeup_summary()` returns bare and shake-up-corrected spectra together with the underlying probability curve
+- Optional `pymbxas[plot]` extra adds `pymbxas.plotting.plot_shakeup_summary()` for a ready-made shake-up comparison figure
+- HDF5 file creation, file reads, and SCF snapshot writes now log at debug level
 
 ### Changed
 - Spectral intensity now includes the photon-energy prefactor of the absorption cross section, so relative peak heights shift slightly across an edge
@@ -27,6 +30,11 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - Reloading a calculation no longer reads orbital coefficients until they are used
 
 ### Fixed
+- Verbosity level 5 now logs more detail than level 4, instead of the two being identical
+- The shake-up probability plot range no longer clips satellites at negative energy shifts
+- `ase_to_mole` now warns when forwarding an unrecognized keyword to PySCF's `Mole`/`Cell` constructor
+- Failed temporary-file cleanup now logs a warning instead of failing silently
+- Batch calculation failures now identify which structure and excitation target failed, instead of a generic message
 - Ground-state localization is now decided from both spin channels, not just beta, so exciting the alpha channel no longer risks skipping needed localization
 - Fixed identification of the core orbital to excite when occupations are not aufbau
 - Fixed near-degenerate core orbitals being listed twice, which could break localization

@@ -5,10 +5,13 @@ HDF5 persistence primitives for pymbxas.
 """
 
 import json
+import logging
 
 import h5py
 import numpy as np
 from ase.io import jsonio
+
+logger = logging.getLogger(__name__)
 
 #%%
 
@@ -117,6 +120,7 @@ def open_read(path, expected_kind):
     except Exception:
         f.close()
         raise
+    logger.debug("Opened %s HDF5 file for reading: %s", expected_kind, path)
     return f
 
 
@@ -132,6 +136,7 @@ def read_lazy_field(source, name):
 def create(path, kind):
     f = h5py.File(path, "w")
     stamp(f, kind)
+    logger.debug("Created %s HDF5 file: %s", kind, path)
     return f
 
 
@@ -157,6 +162,7 @@ def write_snapshot(group, data):
     mo_coeff_del = getattr(data, "mo_coeff_del", None)
     if mo_coeff_del is not None:
         write_array(scf, "mo_coeff_del", np.asarray(mo_coeff_del))
+    logger.debug("Wrote SCF snapshot to group %s", group.name)
     return
 
 

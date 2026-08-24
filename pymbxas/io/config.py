@@ -11,6 +11,14 @@ import logging
 
 #%%
 
+# below DEBUG (10): fine-grained per-quantity numerical trace data (e.g.
+# per-order shake-up masses and the auto-order decision), too voluminous
+# to want at the ordinary DEBUG level but useful when actively diagnosing
+# a specific numerical question. Registered once here so any module can
+# `from pymbxas.io.config import TRACE` and `logger.log(TRACE, ...)`.
+TRACE = 5
+logging.addLevelName(TRACE, "TRACE")
+
 class LevelFirstLetterFilter(logging.Filter):
     """
     Custom filter to add the first letter of the log level to the log record.
@@ -33,7 +41,7 @@ def configure_logger(level, log_file=None):
         2: logging.WARNING,
         3: logging.INFO,
         4: logging.DEBUG,
-        5: logging.DEBUG,
+        5: TRACE,
     }
 
     if level not in level_mapping:

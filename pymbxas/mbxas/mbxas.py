@@ -10,6 +10,29 @@ import numpy as np
 
 #%%
 
+def occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel, core_orb_idx):
+    """Occupied/unoccupied valence orbital indices for one spin channel.
+
+    gs_mo_occ_channel, fch_mo_occ_channel: (norb,) occupation numbers for
+        the GS and FCH calculations, one spin channel.
+    core_orb_idx: the excited core orbital's GS MO index, excluded from
+        the GS occupied set.
+
+    Returns (occ_idxs_gs, occ_idxs_fch, uno_idxs_fch). uno_idxs_fch drops
+    the core-hole index (position 0 of the FCH unoccupied set).
+    """
+    gs_occ_idxs = np.where(gs_mo_occ_channel == 1)[0]
+    if core_orb_idx not in gs_occ_idxs:
+        raise ValueError(
+            f"Orbital index {core_orb_idx} is not occupied in the ground "
+            f"state calculation for this channel. Occupied indices: {gs_occ_idxs}"
+        )
+    occ_idxs_gs  = np.setdiff1d(gs_occ_idxs, [core_orb_idx])
+    occ_idxs_fch = np.where(fch_mo_occ_channel == 1)[0]
+    uno_idxs_fch = np.where(fch_mo_occ_channel == 0)[0][1:]
+    return occ_idxs_gs, occ_idxs_fch, uno_idxs_fch
+
+
 def build_A_K(mb_overlap_channel, occ_idxs_fch, occ_idxs_gs, uno_idxs_fch):
     """Valence overlap determinant and K matrix for one spin channel.
 
@@ -68,15 +91,8 @@ def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None
     exc_orb_idx = np.where(fch_calc.mo_occ[channel] == 0)[0][0]
 
     # Occupied and unoccupied orbital indices for GS and FCH (excited channel)
-    occ_idxs_fch = np.where(fch_calc.mo_occ[channel] == 1)[0]
-    gs_occ_idxs = np.where(gs_calc.mo_occ[channel] == 1)[0]
-    if gs_orb_idx not in gs_occ_idxs:
-        raise ValueError(
-            f"Orbital index {gs_orb_idx} is not occupied in the ground state "
-            f"calculation for channel {channel}. Occupied indices: {gs_occ_idxs}"
-        )
-    occ_idxs_gs  = np.setdiff1d(gs_occ_idxs, [gs_orb_idx])
-    uno_idxs_fch = np.where(fch_calc.mo_occ[channel] == 0)[0][1:]
+    occ_idxs_gs, occ_idxs_fch, uno_idxs_fch = occ_unocc_indices(
+        gs_calc.mo_occ[channel], fch_calc.mo_occ[channel], gs_orb_idx)
 
     # Extract A/K matrices for the excited channel
     AMat, ADet, KMat = build_A_K(mb_overlap[channel], occ_idxs_fch, occ_idxs_gs, uno_idxs_fch)
