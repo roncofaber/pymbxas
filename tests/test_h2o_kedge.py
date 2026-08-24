@@ -189,6 +189,17 @@ def test_h2o_oxygen_kedge(tmp_path):
     assert np.allclose(np.sort(w1), np.sort(w1_manual.ravel()), atol=1e-14), \
         "order=1 shake-up weights do not match |K_vc|^2"
 
+    # shakedown_only filters to negative delta_e only ("shake-down",
+    # mbxas-qe's kpoint_spectral_details.f90 convention), at the
+    # single-order level
+    e1_down, w1_down = shakeup_sticks(K_ch, eps_occ_ch, eps_unocc_ch, order=1, shakedown_only=True)
+    assert np.all(e1_down < 0), "shakedown_only=True should keep only negative delta_e sticks"
+    manual_mask = e1 < 0
+    assert np.array_equal(np.sort(e1_down), np.sort(e1[manual_mask])), \
+        "shakedown_only=True should match a manual delta_e<0 filter of the unfiltered order-1 sticks"
+    assert np.array_equal(np.sort(w1_down), np.sort(w1[manual_mask])), \
+        "shakedown_only=True should keep the matching weights unchanged"
+
     # order=2: weight is the antisymmetrized 2x2 minor of K, matching
     # mbxas-qe's doubles_overlap formula exactly. K has shape (n_unocc, n_occ),
     # so K[c,v] = K[conduction_idx, valence_idx]. Use non-degenerate indices

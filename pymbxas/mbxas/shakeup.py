@@ -24,13 +24,18 @@ MAX_IMPLEMENTED_ORDER = 2
 logger = logging.getLogger(__name__)
 
 
-def shakeup_sticks(K, eps_occ, eps_unocc, order):
+def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False):
     """Order-k valence shake-up stick spectrum.
 
     K: (n_unocc, n_occ) matrix for one spin channel (mbxas.mbxas.build_A_K).
     eps_occ: (n_occ,) orbital energies of the valence manifold indexing K's columns.
     eps_unocc: (n_unocc,) orbital energies of the conduction manifold indexing K's rows.
     order: number of simultaneous valence -> conduction excitations.
+    shakedown_only: if True, keep only combinations whose electron-hole
+        energy delta_e is negative -- mbxas-qe's "shakedown" case
+        (kpoint_spectral_details.f90: shakedown = any(de < 0)). A
+        diagnostic isolation of the sign-anomalous combinations, not a
+        different formula.
 
     Returns (delta_e, weight): flat 1D arrays, one entry per combination of
     `order` valence orbitals promoted to `order` conduction orbitals.
@@ -65,7 +70,12 @@ def shakeup_sticks(K, eps_occ, eps_unocc, order):
     delta_e = (eps_unocc[c_combos].sum(axis=1)[None, :]
                - eps_occ[v_combos].sum(axis=1)[:, None])  # (n_v_combos, n_c_combos)
 
-    return delta_e.ravel(), weight.ravel()
+    delta_e = delta_e.ravel()
+    weight = weight.ravel()
+    if shakedown_only:
+        mask = delta_e < 0
+        delta_e, weight = delta_e[mask], weight[mask]
+    return delta_e, weight
 
 
 def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01):
