@@ -132,8 +132,11 @@ def _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_ord
     # both tuples, kept sorted, order == len(cols_out) == len(rows_in).
     active = []
     for c0, v0 in zip(seed_c.tolist(), seed_v.tolist()):
-        A_pivot1, A_inv1 = sherman_morrison_row_update(AMat, A_inv0, v0, APrimeMat[c0])
-        active.append(((v0,), (c0,), A_pivot1, A_inv1))
+        try:
+            A_pivot1, A_inv1 = sherman_morrison_row_update(AMat, A_inv0, v0, APrimeMat[c0])
+            active.append(((v0,), (c0,), A_pivot1, A_inv1))
+        except np.linalg.LinAlgError:
+            continue
 
     result = {}
     seen = set()
@@ -158,8 +161,11 @@ def _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_ord
             key = (tuple(sorted(cols_out + (new_v,))), tuple(sorted(rows_in + (new_c,))))
             if key in seen or key in found:
                 continue
-            A_pivot_new, A_inv_new = sherman_morrison_row_update(A_pivot, A_inv, new_v, APrimeMat[new_c])
-            found[key] = (A_pivot_new, A_inv_new)
+            try:
+                A_pivot_new, A_inv_new = sherman_morrison_row_update(A_pivot, A_inv, new_v, APrimeMat[new_c])
+                found[key] = (A_pivot_new, A_inv_new)
+            except np.linalg.LinAlgError:
+                continue
 
         if not found:
             break
