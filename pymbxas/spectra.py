@@ -373,13 +373,13 @@ class Spectra():
             occ_idxs_gs, occ_idxs_fch, uno_idxs_fch = occ_unocc_indices(
                 self._gs_mo_occ[channel], self._mo_occ[channel], self._core_orb_idx)
 
-            _, _, K, _ = build_A_K(self._mb_overlap[channel], occ_idxs_fch,
-                                occ_idxs_gs, uno_idxs_fch)
+            AMat, _, _, APrimeMat = build_A_K(self._mb_overlap[channel], occ_idxs_fch,
+                                              occ_idxs_gs, uno_idxs_fch)
 
             eps_occ   = self._fch_mo_energy[channel][occ_idxs_fch]
             eps_unocc = self._fch_mo_energy[channel][uno_idxs_fch]
 
-            sticks_by_order, _ = shakeup_sticks_by_order(K, eps_occ, eps_unocc, order=order, tol=tol)
+            sticks_by_order, _ = shakeup_sticks_by_order(AMat, APrimeMat, eps_occ, eps_unocc, order=order, tol=tol)
             self._shakeup_cache_by_order[key] = {
                 k: (Ha * e, w) for k, (e, w) in sticks_by_order.items()
             }
@@ -432,13 +432,13 @@ class Spectra():
             occ_idxs_gs, occ_idxs_fch, uno_idxs_fch = spectator_occ_unocc_indices(
                 self._gs_mo_occ[channel], self._mo_occ[channel])
 
-            _, _, K, _ = build_A_K(self._mb_overlap[channel], occ_idxs_fch,
-                                occ_idxs_gs, uno_idxs_fch)
+            AMat, _, _, APrimeMat = build_A_K(self._mb_overlap[channel], occ_idxs_fch,
+                                              occ_idxs_gs, uno_idxs_fch)
 
             eps_occ   = self._fch_mo_energy[channel][occ_idxs_fch]
             eps_unocc = self._fch_mo_energy[channel][uno_idxs_fch]
 
-            sticks_by_order, _ = shakeup_sticks_by_order(K, eps_occ, eps_unocc, order=order, tol=tol)
+            sticks_by_order, _ = shakeup_sticks_by_order(AMat, APrimeMat, eps_occ, eps_unocc, order=order, tol=tol)
             self._spectator_shakeup_cache[key] = {
                 k: (Ha * e, w) for k, (e, w) in sticks_by_order.items()
             }
