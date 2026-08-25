@@ -6,6 +6,33 @@ import ase.build
 from ase import units
 from pymbxas.calculators.pyscf import PySCF_mbxas
 from pymbxas.build.structure import ase_to_mole
+from pymbxas.mbxas.maxvol import sherman_morrison_row_update
+
+
+def test_sherman_morrison_row_update():
+    rng = np.random.default_rng(0)
+    n = 5
+    A = rng.normal(size=(n, n))
+    A_inv = np.linalg.inv(A)
+
+    for row_idx in range(n):
+        new_row = rng.normal(size=n)
+        A_new, A_inv_new = sherman_morrison_row_update(A, A_inv, row_idx, new_row)
+
+        A_expected = A.copy()
+        A_expected[row_idx] = new_row
+        assert np.allclose(A_new, A_expected), \
+            f"row {row_idx}: updated matrix does not match the row replacement"
+
+        A_inv_expected = np.linalg.inv(A_expected)
+        assert np.allclose(A_inv_new, A_inv_expected, atol=1e-10), \
+            f"row {row_idx}: Sherman-Morrison inverse disagrees with np.linalg.inv from scratch"
+
+    # A near-singular update (new row duplicates another row) must raise,
+    # not silently return garbage.
+    A_dup = A.copy()
+    with pytest.raises(np.linalg.LinAlgError):
+        sherman_morrison_row_update(A, A_inv, 0, A_dup[1])
 
 
 def test_h2o_oxygen_kedge(tmp_path):
