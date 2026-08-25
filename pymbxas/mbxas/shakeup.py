@@ -136,6 +136,8 @@ def _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_ord
             A_pivot1, A_inv1 = sherman_morrison_row_update(AMat, A_inv0, v0, APrimeMat[c0])
             active.append(((v0,), (c0,), A_pivot1, A_inv1))
         except np.linalg.LinAlgError:
+            # Candidate rows are linearly dependent; heuristic search continues with the next seed.
+            logger.log(TRACE, "seed candidate (c=%d, v=%d) singular, skipping", c0, v0)
             continue
 
     result = {}
@@ -165,6 +167,8 @@ def _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_ord
                 A_pivot_new, A_inv_new = sherman_morrison_row_update(A_pivot, A_inv, new_v, APrimeMat[new_c])
                 found[key] = (A_pivot_new, A_inv_new)
             except np.linalg.LinAlgError:
+                # Candidate rows are linearly dependent; heuristic search continues with the next candidate.
+                logger.log(TRACE, "extension candidate (new_c=%d, new_v=%d) singular, skipping", new_c, new_v)
                 continue
 
         if not found:
