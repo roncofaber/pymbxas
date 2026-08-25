@@ -18,6 +18,7 @@ Entries describe what changed for someone using the package. Conventions in `CLA
 - `get_shakeup_summary` now reports a `shakedown_fraction` for the shake-up probability distribution
 
 ### Changed
+- Shake-up satellite configuration search now uses a maxvol-based swap search instead of magnitude-pruned order-2-only combinatorics; shake-up intensities may shift slightly and order-3+ satellites can now appear.
 - Spectral intensity now includes the photon-energy prefactor of the absorption cross section, so relative peak heights shift slightly across an edge
 - Broadened spectra are now area-normalized, so integrated intensity no longer depends on `sigma`
 - A structure's own periodicity now decides whether a calculation is treated as periodic
