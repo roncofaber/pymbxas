@@ -69,16 +69,19 @@ def build_A_K(mb_overlap_channel, occ_idxs_fch, occ_idxs_gs, uno_idxs_fch):
     occ_idxs_gs: GS occupied valence orbital indices for that channel
         (excited core orbital excluded).
 
-    Returns (AMat, ADet, KMat): AMat is the square valence overlap matrix,
-    ADet its determinant, KMat = A'Mat @ inv(AMat) the matrix used both for
-    the n=1 amplitude (Eq. 22, PRB 107,035146) and, at higher order, for
-    shake-up minors (see mbxas.shakeup).
+    Returns (AMat, ADet, KMat, APrimeMat): AMat is the square valence overlap
+    matrix, ADet its determinant, KMat = A'Mat @ inv(AMat) the matrix used
+    both for the n=1 amplitude (Eq. 22, PRB 107,035146) and, at higher
+    order, for shake-up minors (see mbxas.shakeup). APrimeMat is returned
+    alongside KMat because mbxas.shakeup's maxvol-based configuration
+    search needs the raw unoccupied-valence overlap rows, not just their
+    product with inv(AMat).
     """
     AMat = mb_overlap_channel[np.ix_(occ_idxs_fch, occ_idxs_gs)]
     ADet = np.linalg.det(AMat)
     APrimeMat = mb_overlap_channel[np.ix_(uno_idxs_fch, occ_idxs_gs)]
     KMat = APrimeMat @ np.linalg.inv(AMat)
-    return AMat, ADet, KMat
+    return AMat, ADet, KMat, APrimeMat
 
 # Function to run MBXAS of pyscf calculators
 def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None):
@@ -121,7 +124,7 @@ def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None
         gs_calc.mo_occ[channel], fch_calc.mo_occ[channel], gs_orb_idx)
 
     # Extract A/K matrices for the excited channel
-    AMat, ADet, KMat = build_A_K(mb_overlap[channel], occ_idxs_fch, occ_idxs_gs, uno_idxs_fch)
+    AMat, ADet, KMat, _ = build_A_K(mb_overlap[channel], occ_idxs_fch, occ_idxs_gs, uno_idxs_fch)
 
     # Transition dipole moments from excited orbital (excited channel)
     chb_xmat     = dipole_KS[channel][:, :, exc_orb_idx]

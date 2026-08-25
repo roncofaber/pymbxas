@@ -203,7 +203,7 @@ def test_h2o_oxygen_kedge(tmp_path):
     occ_idxs_fch_ch = np.where(fch.mo_occ[ch] == 1)[0]
     uno_idxs_fch_ch = np.where(fch.mo_occ[ch] == 0)[0][1:]
     mb_overlap_ch = exc.mbxas["mb_overlap"][ch]
-    _, _, K_ch = build_A_K(mb_overlap_ch, occ_idxs_fch_ch, occ_idxs_gs_ch, uno_idxs_fch_ch)
+    AMat_ch, _, K_ch, APrimeMat_ch = build_A_K(mb_overlap_ch, occ_idxs_fch_ch, occ_idxs_gs_ch, uno_idxs_fch_ch)
     eps_occ_ch = fch.mo_energy[ch][occ_idxs_fch_ch]
     eps_unocc_ch = fch.mo_energy[ch][uno_idxs_fch_ch]
 
