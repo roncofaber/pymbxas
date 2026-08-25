@@ -18,6 +18,7 @@ import logging
 import numpy as np
 
 from pymbxas.io.config import TRACE
+from pymbxas.mbxas.maxvol import sherman_morrison_row_update
 
 MAX_IMPLEMENTED_ORDER = 2
 
@@ -169,6 +170,117 @@ def _shakeup_sticks_order2(K, eps_occ, eps_unocc, tol):
             "so this is close to the brute-force cost.", m, n_singles, tol)
 
     return delta_e, weight
+
+
+def _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_order=None):
+    """Order>=2 shake-up configurations via a maxvol-style swap search.
+
+    Order 1 is exact and handled elsewhere (shakeup_sticks_by_order):
+    a plain enumeration of all n_occ*n_unocc singles is already cheap and
+    complete, so there is nothing to search for at order 1. This searches
+    order 2 and beyond, where brute-force enumeration is what actually
+    explodes -- see docs/superpowers/specs/2026-08-24-maxvol-shakeup-search-design.md.
+
+    A configuration is a set of k occupied valence orbitals ("cols_out")
+    simultaneously swapped for k virtual orbitals ("rows_in"). Its weight
+    is |det(K[rows_in, cols_out])|**2 -- the Jacobi complementary-minor
+    identity that makes any k-swap weight a plain minor of K (the same
+    formula shakeup_sticks already used for order 2, no longer hardcoded
+    to k=2).
+
+    Search strategy, mirroring mbxas-qe's maxvol_multi_mod.f90: seed from
+    the top-ranked order-1 singles (already known via |K|**2, no cost to
+    reuse); from each seed, use the Sherman-Morrison-updated pivot inverse
+    to find the best next swap (the B-matrix candidate step); extend
+    breadth-first order by order; stop when a new order's total captured
+    weight drops below tol * order-1 mass (mass1) -- the same convergence
+    convention shakeup_sticks_by_order's "auto" mode already uses.
+
+    min_order: if given, keep searching past the tol-based stop until at
+    least this order has been attempted (or the search runs out of
+    candidates), matching shakeup_sticks_by_order's "explicit order never
+    silently downgrades" contract. Ignored (tol-based stopping always
+    applies) when None.
+
+    Returns {order: (delta_e, weight)} for order >= 2, empty if nothing
+    found or nothing exceeds tol.
+    """
+    n_occ = len(eps_occ)
+    n_unocc = len(eps_unocc)
+    if n_occ < 2 or n_unocc < 2:
+        return {}
+
+    importance = np.abs(K) ** 2  # (n_unocc, n_occ), same as order-1 weights
+    mass1 = importance.sum()
+    if mass1 == 0:
+        return {}
+
+    n_seeds = min(64, n_unocc * n_occ)
+    flat_rank = np.argsort(-importance, axis=None)[:n_seeds]
+    seed_c, seed_v = np.unravel_index(flat_rank, importance.shape)
+
+    A_inv0 = np.linalg.inv(AMat)
+
+    # Each active branch: (cols_out, rows_in, A_pivot, A_inv). cols_out are
+    # valence-slot indices (K's column axis) already swapped out, rows_in
+    # are candidate unocc indices (K's row axis) already swapped in --
+    # both tuples, kept sorted, order == len(cols_out) == len(rows_in).
+    active = []
+    for c0, v0 in zip(seed_c.tolist(), seed_v.tolist()):
+        A_pivot1, A_inv1 = sherman_morrison_row_update(AMat, A_inv0, v0, APrimeMat[c0])
+        active.append(((v0,), (c0,), A_pivot1, A_inv1))
+
+    result = {}
+    seen = set()
+    order = 2
+    max_order = min(n_occ, n_unocc)
+    while active and order <= max_order:
+        found = {}  # (cols_out, rows_in) -> (A_pivot, A_inv)
+        for cols_out, rows_in, A_pivot, A_inv in active:
+            avail_slots = [q for q in range(n_occ) if q not in cols_out]
+            avail_c = [c for c in range(n_unocc) if c not in rows_in]
+            if not avail_slots or not avail_c:
+                continue
+            B = APrimeMat[avail_c] @ A_inv  # (n_avail_c, n_occ)
+            B_masked = B[:, avail_slots]
+            flat = np.argmax(np.abs(B_masked))
+            cand_pos, slot_pos = np.unravel_index(flat, B_masked.shape)
+            b_val = B_masked[cand_pos, slot_pos]
+            if abs(b_val) <= 1.0 + tol:
+                continue
+            new_c = avail_c[cand_pos]
+            new_v = avail_slots[slot_pos]
+            key = (tuple(sorted(cols_out + (new_v,))), tuple(sorted(rows_in + (new_c,))))
+            if key in seen or key in found:
+                continue
+            A_pivot_new, A_inv_new = sherman_morrison_row_update(A_pivot, A_inv, new_v, APrimeMat[new_c])
+            found[key] = (A_pivot_new, A_inv_new)
+
+        if not found:
+            break
+
+        cols_list = [np.array(k[0]) for k in found]
+        rows_list = [np.array(k[1]) for k in found]
+        weight = np.array([
+            np.abs(np.linalg.det(K[np.ix_(r, c)])) ** 2
+            for c, r in zip(cols_list, rows_list)
+        ])
+        delta_e = np.array([
+            eps_unocc[r].sum() - eps_occ[c].sum()
+            for c, r in zip(cols_list, rows_list)
+        ])
+
+        captured = weight.sum()
+        force_keep = min_order is not None and order <= min_order
+        if not force_keep and captured < tol * mass1:
+            break
+
+        result[order] = (delta_e, weight)
+        seen.update(found.keys())
+        active = [(k[0], k[1], A_pivot, A_inv) for k, (A_pivot, A_inv) in found.items()]
+        order += 1
+
+    return result
 
 
 def shakeup_sticks_by_order(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):

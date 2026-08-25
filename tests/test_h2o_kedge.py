@@ -35,6 +35,37 @@ def test_sherman_morrison_row_update():
         sherman_morrison_row_update(A, A_inv, 0, A_dup[1])
 
 
+def test_maxvol_shakeup_configs_matches_minor_identity():
+    from pymbxas.mbxas.shakeup import _maxvol_shakeup_configs
+
+    rng = np.random.default_rng(1)
+    n_occ, n_unocc = 4, 4
+    AMat = np.eye(n_occ) + 0.01 * rng.normal(size=(n_occ, n_occ))
+    APrimeMat = 0.01 * rng.normal(size=(n_unocc, n_occ))
+    # Make one specific 2-swap configuration (valence {0,2} -> conduction
+    # {1,3}) dominant so the search is guaranteed to find it.
+    APrimeMat[1, 0] = 0.9
+    APrimeMat[3, 2] = 0.9
+
+    K = APrimeMat @ np.linalg.inv(AMat)
+    eps_occ = np.array([-1.0, -1.2, -1.4, -1.6])
+    eps_unocc = np.array([0.5, 0.6, 0.7, 0.8])
+
+    configs = _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol=1e-6)
+
+    assert 2 in configs, "the dominant 2-swap configuration should be found at order 2"
+    delta_e, weight = configs[2]
+    assert len(weight) >= 1
+
+    expected_weight = np.abs(np.linalg.det(K[np.ix_([1, 3], [0, 2])])) ** 2
+    expected_delta_e = (eps_unocc[1] + eps_unocc[3]) - (eps_occ[0] + eps_occ[2])
+    assert any(abs(w - expected_weight) < 1e-10 for w in weight), \
+        "no discovered order-2 config matches the hand-computed dominant 2x2 minor"
+    idx = np.argmin(np.abs(weight - expected_weight))
+    assert abs(delta_e[idx] - expected_delta_e) < 1e-10, \
+        "the matching config's delta_e does not match the expected energy sum"
+
+
 def test_h2o_oxygen_kedge(tmp_path):
     structure = ase.build.molecule("H2O")
 
