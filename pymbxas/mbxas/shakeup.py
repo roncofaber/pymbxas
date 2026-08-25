@@ -12,7 +12,6 @@ on, not a separate approximation. See dev/method.md and
 docs/superpowers/specs/2026-08-21-shakeup-satellites-design.md.
 """
 
-import itertools
 import logging
 
 import numpy as np
@@ -20,155 +19,61 @@ import numpy as np
 from pymbxas.io.config import TRACE
 from pymbxas.mbxas.maxvol import sherman_morrison_row_update
 
-MAX_IMPLEMENTED_ORDER = 2
-
 logger = logging.getLogger(__name__)
 
 
-def shakeup_sticks(K, eps_occ, eps_unocc, order, shakedown_only=False, tol=0.01):
+def shakeup_sticks(AMat, APrimeMat, eps_occ, eps_unocc, order, shakedown_only=False, tol=0.01):
     """Order-k valence shake-up stick spectrum.
 
-    K: (n_unocc, n_occ) matrix for one spin channel (mbxas.mbxas.build_A_K).
-    eps_occ: (n_occ,) orbital energies of the valence manifold indexing K's columns.
-    eps_unocc: (n_unocc,) orbital energies of the conduction manifold indexing K's rows.
+    AMat: (n_occ, n_occ) valence overlap matrix (mbxas.mbxas.build_A_K).
+    APrimeMat: (n_unocc, n_occ) unoccupied-valence overlap matrix
+        (mbxas.mbxas.build_A_K) -- rows are candidate virtual orbitals,
+        columns match AMat's columns.
+    eps_occ: (n_occ,) orbital energies of the valence manifold.
+    eps_unocc: (n_unocc,) orbital energies of the conduction manifold.
     order: number of simultaneous valence -> conduction excitations.
     shakedown_only: if True, keep only combinations whose electron-hole
         energy delta_e is negative -- mbxas-qe's "shakedown" case
         (kpoint_spectral_details.f90: shakedown = any(de < 0)). A
         diagnostic isolation of the sign-anomalous combinations, not a
         different formula.
-    tol: only used for order == 2, see _shakeup_sticks_order2.
+    tol: passed to the order>=2 maxvol search (_maxvol_shakeup_configs);
+        unused for order == 1, which is always exact.
 
-    Returns (delta_e, weight): flat 1D arrays, one entry per combination of
-    `order` valence orbitals promoted to `order` conduction orbitals.
-    weight = |det(K[c_combo, v_combo])|**2. For order == 2 this is not
-    every combination -- see _shakeup_sticks_order2.
+    Returns (delta_e, weight): flat 1D arrays. weight =
+    |det(K[c_combo, v_combo])|**2 for whatever combinations the order==1
+    exact enumeration, or the order>=2 maxvol search, actually finds.
     """
     if order < 1:
         raise ValueError(f"order must be >= 1, got {order}")
-    if order > MAX_IMPLEMENTED_ORDER:
-        raise NotImplementedError(
-            f"shake-up order {order} is not implemented: the number of "
-            f"{order}-fold valence/conduction combinations grows as "
-            f"O(n_occ**{order} * n_unocc**{order}), and nothing here prunes "
-            "that combinatorics the way mbxas-qe's adaptive-tolerance "
-            "triples_overlap does. Implemented orders: 1-"
-            f"{MAX_IMPLEMENTED_ORDER}."
-        )
 
     n_occ = len(eps_occ)
     n_unocc = len(eps_unocc)
     if order > n_occ or order > n_unocc:
         return np.empty(0), np.empty(0)
 
-    if order == 2:
-        delta_e, weight = _shakeup_sticks_order2(K, eps_occ, eps_unocc, tol)
-        if shakedown_only:
-            mask = delta_e < 0
-            delta_e, weight = delta_e[mask], weight[mask]
-        return delta_e, weight
+    K = APrimeMat @ np.linalg.inv(AMat)
 
-    v_combos = np.array(list(itertools.combinations(range(n_occ), order)))
-    c_combos = np.array(list(itertools.combinations(range(n_unocc), order)))
+    if order == 1:
+        delta_e, weight = _order1_sticks(K, eps_occ, eps_unocc)
+    else:
+        configs = _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_order=order)
+        if order not in configs:
+            return np.empty(0), np.empty(0)
+        delta_e, weight = configs[order]
 
-    # K from build_A_K has shape (n_unocc, n_occ); index with c_combos on rows, v_combos on columns
-    # sub[i, j] is the (order, order) submatrix of K for valence combo i,
-    # conduction combo j; numpy.linalg.det batches over leading dimensions
-    sub = K[c_combos[None, :, :, None], v_combos[:, None, None, :]]
-    weight = np.abs(np.linalg.det(sub)) ** 2  # (n_v_combos, n_c_combos)
-
-    delta_e = (eps_unocc[c_combos].sum(axis=1)[None, :]
-               - eps_occ[v_combos].sum(axis=1)[:, None])  # (n_v_combos, n_c_combos)
-
-    delta_e = delta_e.ravel()
-    weight = weight.ravel()
     if shakedown_only:
         mask = delta_e < 0
         delta_e, weight = delta_e[mask], weight[mask]
     return delta_e, weight
 
 
-def _shakeup_sticks_order2(K, eps_occ, eps_unocc, tol):
-    """Order-2 valence shake-up sticks, pruned by |K|**2 magnitude.
-
-    The brute-force route (all C(n_occ, 2) valence pairs times all
-    C(n_unocc, 2) conduction pairs) enumerates every 2x2 minor of K
-    regardless of size, which is what actually explodes for real systems
-    (147M sticks for a modest active space) -- most valence electrons
-    barely relax when a core hole forms, so almost all of those minors are
-    negligible. This mirrors what mbxas-qe's doubles_overlap
-    (SHIRLEY/src/mbxas_spectra.f90) does instead: treat every single
-    valence->conduction transition (v, c) as one candidate ranked by
-    |K(c, v)|**2, and only form 2x2 minors between candidates that are
-    both large. Concretely: sort all n_occ*n_unocc singles by |K|**2
-    descending, then iteratively grow an "active" prefix of that list
-    (geometric growth stands in for QE's shrinking-tolerance schedule --
-    both just mean "look at progressively smaller matrix elements"),
-    forming all valid pairs (distinct v, distinct c) within the active set
-    each round, until the accumulated order-2 weight stops changing by
-    more than tol relative to the order-1 mass -- the same mass-based
-    convergence convention shakeup_sticks_by_order's "auto" order already
-    uses. If K has no sparsity at all, the active set grows to cover every
-    singles pair and this costs the same as brute force; that is a
-    property of K, not something pruning can fix.
-    """
-    n_occ = len(eps_occ)
-    n_unocc = len(eps_unocc)
-    n_singles = n_occ * n_unocc
-    if n_occ < 2 or n_unocc < 2:
-        return np.empty(0), np.empty(0)
-
-    c_idx = np.repeat(np.arange(n_unocc), n_occ)
-    v_idx = np.tile(np.arange(n_occ), n_unocc)
-    k1 = K.ravel()
-    importance = np.abs(k1) ** 2
-    mass1 = importance.sum()
-    if mass1 == 0:
-        return np.empty(0), np.empty(0)
-    delta_e1 = eps_unocc[c_idx] - eps_occ[v_idx]
-
-    rank = np.argsort(-importance)
-    v_s, c_s, k_s, de_s = v_idx[rank], c_idx[rank], k1[rank], delta_e1[rank]
-
-    delta_e = weight = np.empty(0)
-    prev_mass = 0.0
-    m = min(64, n_singles)
-    while True:
-        v_a, c_a, k_a, de_a = v_s[:m], c_s[:m], k_s[:m], de_s[:m]
-
-        # Each {v,v'}x{c,c'} quartet appears twice among distinct-v,
-        # distinct-c singles pairs -- once as (v,c)&(v',c'), once as
-        # (v,c')&(v',c) -- and both give the same |2x2 minor|**2. Keep
-        # only the "concordant" matching (smaller v paired with smaller c)
-        # to count each combo once.
-        i, j = np.triu_indices(m, k=1)
-        keep = (v_a[i] != v_a[j]) & (c_a[i] != c_a[j]) \
-            & ((v_a[i].astype(np.int64) - v_a[j]) * (c_a[i].astype(np.int64) - c_a[j]) > 0)
-        i, j = i[keep], j[keep]
-
-        diag = k_a[i] * k_a[j]
-        cross = K[c_a[j], v_a[i]] * K[c_a[i], v_a[j]]
-        weight = np.abs(diag - cross) ** 2
-        delta_e = de_a[i] + de_a[j]
-
-        mass = weight.sum()
-        converged = m >= n_singles or (mass > 0 and abs(mass - prev_mass) < tol * max(mass1, mass))
-        logger.log(TRACE,
-            "shake-up order-2 pruning: active singles=%d/%d pairs=%d "
-            "mass=%.6e (order-1 mass=%.6e, tol=%.3g) -> %s",
-            m, n_singles, len(weight), mass, mass1, tol,
-            "converged" if converged else "widening")
-        if converged:
-            break
-        prev_mass = mass
-        m = min(m * 4, n_singles)
-
-    if m > 256:
-        logger.warning(
-            "shake-up order-2 pruning needed an active set of %d/%d "
-            "singles to converge (tol=%.3g) -- K is not very sparse here, "
-            "so this is close to the brute-force cost.", m, n_singles, tol)
-
+def _order1_sticks(K, eps_occ, eps_unocc):
+    """Exact order-1 shake-up sticks: every valence->conduction single,
+    no pruning (n_occ*n_unocc is always cheap). Shared by shakeup_sticks
+    and shakeup_sticks_by_order so the formula lives in one place."""
+    delta_e = (eps_unocc[:, None] - eps_occ[None, :]).ravel()
+    weight = (np.abs(K) ** 2).ravel()
     return delta_e, weight
 
 
@@ -283,8 +188,9 @@ def _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_ord
     return result
 
 
-def shakeup_sticks_by_order(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):
-    """Per-order valence shake-up sticks, order 1 up to the requested order.
+def shakeup_sticks_by_order(AMat, APrimeMat, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):
+    """Per-order valence shake-up sticks, order 1 up to whatever the
+    maxvol search (order>=2) finds.
 
     Same order/tol/shakedown_only semantics as shakeup_spectrum. Returns
     (sticks_by_order, orders_included): sticks_by_order is
@@ -292,46 +198,47 @@ def shakeup_sticks_by_order(K, eps_occ, eps_unocc, order="auto", tol=0.01, shake
     per-order breakdown mbxas.shakeup.combine_cross_channel_sticks needs;
     shakeup_spectrum concatenates this into its flat (delta_e, weight)
     contract for callers that don't need the breakdown.
+
+    order="auto": order 1 (always) plus every order>=2 the maxvol search's
+    own tol-based stopping includes.
+    order=N (int): same, but forces the search to keep going past its
+    natural tol-based stop until order N has been attempted (or the search
+    runs out of candidates) -- "explicit order never silently downgrades",
+    matching the pre-existing contract.
     """
-    e1, w1 = shakeup_sticks(K, eps_occ, eps_unocc, 1, shakedown_only=shakedown_only, tol=tol)
-    mass1 = w1.sum()
+    K = APrimeMat @ np.linalg.inv(AMat)
+    e1, w1 = _order1_sticks(K, eps_occ, eps_unocc)
+    if shakedown_only:
+        mask = e1 < 0
+        e1, w1 = e1[mask], w1[mask]
     sticks_by_order = {1: (e1, w1)}
     orders_included = [1]
 
-    if order == "auto":
-        for k in range(2, MAX_IMPLEMENTED_ORDER + 1):
-            ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only, tol=tol)
-            massk = wk.sum()
-            include = mass1 > 0 and massk > tol * mass1
-            logger.log(TRACE,
-                "shake-up auto-order: order %d mass=%.6e (order-1 mass=%.6e, "
-                "tol=%.3g) -> %s", k, massk, mass1, tol,
-                "included" if include else "stopped")
-            if not include:
-                break
-            sticks_by_order[k] = (ek, wk)
-            orders_included.append(k)
-        return sticks_by_order, orders_included
-
-    order = int(order)
-    if order < 1:
+    min_order = None if order == "auto" else int(order)
+    if min_order is not None and min_order < 1:
         raise ValueError(f"order must be >= 1 or 'auto', got {order}")
-    for k in range(2, order + 1):
-        ek, wk = shakeup_sticks(K, eps_occ, eps_unocc, k, shakedown_only=shakedown_only, tol=tol)
+
+    configs = _maxvol_shakeup_configs(AMat, APrimeMat, K, eps_occ, eps_unocc, tol, min_order=min_order)
+    for k in sorted(configs):
+        if min_order is not None and k > min_order:
+            break
+        ek, wk = configs[k]
+        if shakedown_only:
+            mask = ek < 0
+            ek, wk = ek[mask], wk[mask]
         sticks_by_order[k] = (ek, wk)
         orders_included.append(k)
     return sticks_by_order, orders_included
 
 
-def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):
+def shakeup_spectrum(AMat, APrimeMat, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_only=False):
     """Combined shake-up stick spectrum up to the requested order.
 
-    order: "auto" adds each order from 2 up to MAX_IMPLEMENTED_ORDER only
-        while its total weight exceeds tol * (order-1 total weight),
-        stopping at the first order that fails -- so adding a higher
-        MAX_IMPLEMENTED_ORDER later extends "auto" automatically, no
-        separate rewrite needed here. An explicit int always includes
-        every order from 1 up to and including that int, no tolerance check.
+    order: "auto" includes order 1 plus every order the maxvol search's
+        own tol-based convergence includes (see shakeup_sticks_by_order).
+        An explicit int forces inclusion up to that order (no silent
+        downgrade below it, though the search may still find nothing
+        beyond what actually exists for the system).
     shakedown_only: see shakeup_sticks.
 
     Returns (delta_e, weight, orders_included): concatenated sticks across
@@ -339,7 +246,7 @@ def shakeup_spectrum(K, eps_occ, eps_unocc, order="auto", tol=0.01, shakedown_on
     Delegates the per-order construction to shakeup_sticks_by_order.
     """
     sticks_by_order, orders_included = shakeup_sticks_by_order(
-        K, eps_occ, eps_unocc, order=order, tol=tol, shakedown_only=shakedown_only)
+        AMat, APrimeMat, eps_occ, eps_unocc, order=order, tol=tol, shakedown_only=shakedown_only)
     all_e = [sticks_by_order[k][0] for k in orders_included]
     all_w = [sticks_by_order[k][1] for k in orders_included]
     return np.concatenate(all_e), np.concatenate(all_w), orders_included
