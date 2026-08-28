@@ -123,16 +123,15 @@ def test_h2o_oxygen_kedge(tmp_path, monkeypatch):
 
     obj = PySCFMBXAS(
         structure,
-        config=CalculationConfig(xc="lda", basis="def2-svpd"),
-        runtime=RuntimeConfig(
-            work_directory=tmp_path,
-            logging=LoggingConfig(
-                pymbxas_verbosity=1, pyscf_verbosity=0,
-                pyscf_logfile="pyscf.log", pyscf_console=False),
-            checkpoint=CheckpointConfig(enabled=False)),
+        calculation=CalculationConfig(xc="lda", basis="def2-svpd"),
+        checkpoint=None,
     )
 
-    obj.run("O")
+    obj.run(
+        "O", runtime=RuntimeConfig(work_directory=tmp_path),
+        logging=LoggingConfig(
+            pymbxas_verbosity=1, pyscf_verbosity=0,
+            pyscf_logfile="pyscf.log", pyscf_console=False))
 
     exc = obj.excitations[0]
     assert "BEGIN PyMBXAS SCF" in obj.output

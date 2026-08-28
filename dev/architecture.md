@@ -100,31 +100,13 @@ always use the same persisted method and warm-up count.
 
 ### Configuration
 
-`CalculationConfig`, `SCFConfig`, and `ExcitationConfig` are immutable,
-JSON-serializable public
-configuration values. Common call sites may provide readable direct keywords;
-`resolve_excitation_config` converts them to the same canonical
-`ExcitationConfig` used by reusable configurations and persistence. Supplying
-both a complete config and individual overrides is an error, so precedence is
-never implicit.
+Public configurations are validated templates. `.set()` mutates a user-owned template transactionally and `.copy()` creates an independent variant. When a template crosses into a calculator or execution call, PyMBXAS stores an immutable snapshot. Direct field assignment is rejected, as is `.set()` on a calculator-owned snapshot. `to_dict()` and `from_dict()` form the strict JSON/HDF5 boundary; unknown keys are rejected.
 
-`SCFConfig` keeps convergence and recovery settings together. An
-`ExcitationConfig.scf` value is shared by FCH and XCH unless the advanced
-`fch_scf` or `xch_scf` override is supplied. Public channel and occupation
-strings normalize to `SpinChannel` and `OccupationMethod` enums internally.
-`to_dict()` and `from_dict()` form the strict JSON/HDF5 boundary; unknown
-mapping keys are rejected.
-
-`RuntimeConfig` owns device, working directory, logging, and checkpoint
-policy. These session concerns may change on load and are not scientific
-checkpoint metadata. `CalculationConfig` is restored exactly; each excitation
-stores its own `ExcitationConfig`.
+The classes are shallow and lifecycle-specific. `CalculationConfig` contains only the electronic model. Independent `SCFConfig` values are passed as `gs_scf`, `fch_scf`, and `xch_scf`. `ExcitationConfig` contains channel, XCH, and occupation tracking. `RuntimeConfig` contains device and work directory; `LoggingConfig` is separate. A checkpoint is a direct HDF5 path, `None`, or an advanced `CheckpointConfig` carrying artifact policy.
 
 ### `PySCFMBXAS`
 
-Owns the ground state and the list of excitations. Two ways in: a structure
-plus `CalculationConfig`/`RuntimeConfig`, or `.load()` with an optional new
-runtime to restore a checkpoint.
+Owns one electronic model, one ground state, and a list of excitations. Two ways in: a structure plus construction configuration, or `.load()` to restore a checkpoint. Runtime and logging are supplied at execution boundaries.
 
 | Attribute | Meaning |
 |---|---|
@@ -133,13 +115,12 @@ runtime to restore a checkpoint.
 | `gs_data` | `pyscf_data` for the ground state, with `mo_coeff` possibly localized |
 | `gs_data.mo_coeff_del` | the pre-localization coefficients, **only present if localization ran** |
 | `_excitations` | list of successful `Excitation` results; one site/channel may have multiple configurations |
-| `config` | immutable ground-state scientific configuration |
-| `runtime` | device, working directory, logging, and checkpoint policy |
-| `_ran_GS`, `_used_loc` | state flags consulted by `run_ground_state` and `_print_fchk_files` |
+| `calculation`, `gs_scf` | immutable electronic-model and GS-solver snapshots |
+| `checkpoint` | immutable checkpoint policy, or `None` |
+| `runtime`, `logging` | immutable snapshots from the latest execution |
+| `_ran_GS`, `_used_loc` | state flags consulted by `run_gs` and `_print_fchk_files` |
 
-`run()` composes `run_ground_state()` and `excite()`. It never changes the
-process working directory. Direct excitation keywords and a complete
-`ExcitationConfig` are mutually exclusive.
+`run_gs()` runs only GS. `excite()` requires a completed GS. `run()` runs a missing GS and then the requested excitations. None changes the process working directory, and no excitation call accepts electronic-model overrides.
 
 ### `Excitation`
 
@@ -149,7 +130,8 @@ The explicit `.run()` method performs FCH, optional XCH, and determinant math.
 | Attribute | Meaning |
 |---|---|
 | `ato_idx`, `symbol`, `channel` | which atom, which spin |
-| `config` | exact excitation and FCH/XCH solver configuration |
+| `config` | exact physical excitation configuration |
+| `fch_scf`, `xch_scf` | exact constrained-state solver snapshots |
 | `orb_idx` | global MO index of the ground-state core orbital being emptied |
 | `data["fch"]`, `data["xch"]` | `pyscf_data` snapshots |
 | `output["fch"]`, `output["xch"]` | captured PySCF stdout as a string |
@@ -204,13 +186,12 @@ HDF5, written and read by `pymbxas/io/h5.py`. That module owns the schema, the c
 
 The layout mirrors PySCF's chkfile shape: a `mol` dataset holding `mol.dumps()` beside an `scf/` group of `e_tot`, `mo_coeff`, `mo_occ`, `mo_energy` and `nelec`. PySCF's own `save_mol`/`load_scf` wrappers hardcode the root keys `mol` and `scf` and take a filename rather than a group, so only the ground state, which sits at the root, is loadable through them; `chkfile.load_scf(path)` and `mf.from_chk(path)` both work on a checkpoint. Excitation snapshots repeat the same shape at `/excitations/NNN/{fch,xch}/` and are read with `chkfile.load(path, key)` plus `gto.loads`, which accept arbitrary keys.
 
-- `PySCFMBXAS.save()` writes `calculation_config`, the structure, and ground state on first call, then appends one `/excitations/NNN` group per finished excitation. Every group stores its exact `config`; the identity is site, channel, and configuration. The `complete` attribute is written last, and incomplete groups are skipped and safely rewritten. `load()` restores scientific configuration exactly and accepts only a replacement `RuntimeConfig`.
+- `PySCFMBXAS.save()` writes `calculation_config`, `gs_scf_config`, checkpoint policy, structure, and ground state on first call, then appends one `/excitations/NNN` group per finished excitation. Every group stores its excitation, FCH-SCF, and XCH-SCF snapshots; all participate in identity. The `complete` attribute is written last, and incomplete groups are skipped and safely rewritten. `load()` restores these configurations exactly; a later execution may supply new runtime and logging only.
 - `Spectra.save()` stores the structure through `ase.io.jsonio`, the settings as JSON, `mol.dumps()`, and GS/FCH orbital energies, so `make_mol()` is now only the fallback for a file without a stored mol. `Spectras.save()` writes each member into `/spectras/NNN` using the same `_write_into` method. `shakeup/gs_mo_energy` is an additive optional dataset: historical files remain readable, but orbital-diagram requests explain how to recover the missing data.
 - Orbital coefficients load on first access, not at open. `pyscf_data` and `Spectra` both keep an `_h5_source` tuple of `(path, group)` and read through `__getattr__`; `materialize()` forces everything in. The ground state is read eagerly because a restart needs it immediately.
 
 **`.pkl` files cannot be read.** Support was removed in 0.6.0 along with the dill dependency.
-Pre-configuration calculation HDF5 files also require regeneration for schema
-2; no runtime-default inference is used to manufacture missing provenance.
+Calculation HDF5 files using the nested pre-schema-3 configuration layout require regeneration; no runtime-default inference manufactures missing scientific settings.
 The additive historical readers for `Spectra` and `Spectras` remain available.
 
 ## GPU path
@@ -230,7 +211,7 @@ Verified on an RTX 4090 with gpu4pyscf 1.8.1 and cupy-cuda12x 14.2.0: H2O oxygen
 
 Two independent channels, which is deliberate.
 
-- **PySCF output** goes through `io/logger.py`'s `Logger`, assigned to `mol.stdout`. It tees to the terminal, to an in-memory `StringIO` (retrievable as `output` / `output["fch"]`), and optionally to a file. FCH and XCH build their `mol` with `append=True` because the ground-state `mol.stdout` is closed at the end of `run_ground_state`.
+- **PySCF output** goes through `io/logger.py`'s `Logger`, assigned to `mol.stdout`. It tees to the terminal, to an in-memory `StringIO` (retrievable as `output` / `output["fch"]`), and optionally to a file. FCH and XCH build their `mol` with `append=True` because the ground-state `mol.stdout` is closed at the end of `run_gs`.
 - **PyMBXAS progress** goes through the standard `logging` module, configured by `io/config.py`.
 
 Both logfile paths are resolved against `RuntimeConfig.work_directory` before they are opened

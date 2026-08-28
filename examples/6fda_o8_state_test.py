@@ -22,8 +22,8 @@ from ase.units import Hartree
 from pyscf.scf import uhf
 
 from pymbxas import (
-    CalculationConfig, CheckpointConfig, ExcitationConfig, LoggingConfig,
-    PySCFMBXAS, RuntimeConfig, SCFConfig,
+    CalculationConfig, ExcitationConfig, LoggingConfig, PySCFMBXAS,
+    RuntimeConfig, SCFConfig,
 )
 from pymbxas.io.config import configure_logger, format_log_fields
 from pymbxas.mbxas.mbxas import core_hole_index
@@ -268,31 +268,33 @@ def load_or_run_variant(here, paths, method, use_gpu, recalculate):
         level_shift=SCF_LEVEL_SHIFT,
         second_order=SCF_SECOND_ORDER)
     excitation = ExcitationConfig(
-        xch=False, occupation=method, mom_warmup_calls=2, scf=scf)
+        xch=False, occupation=method, mom_warmup_calls=2)
     runtime = RuntimeConfig(
-        work_directory=paths["checkpoints"], device=device,
-        logging=LoggingConfig(
-            pymbxas_verbosity=3,
-            pymbxas_logfile=str(paths["logs"] / f"pymbxas_{name}.log"),
-            pyscf_verbosity=DFT_VERBOSE,
-            pyscf_logfile=str(paths["logs"] / f"pyscf_{name}.log"),
-            pyscf_console=False),
-        checkpoint=CheckpointConfig(filename=checkpoint.name))
+        work_directory=paths["checkpoints"], device=device)
+    logging = LoggingConfig(
+        pymbxas_verbosity=3,
+        pymbxas_logfile=str(paths["logs"] / f"pymbxas_{name}.log"),
+        pyscf_verbosity=DFT_VERBOSE,
+        pyscf_logfile=str(paths["logs"] / f"pyscf_{name}.log"),
+        pyscf_console=False)
     if checkpoint.exists() and not recalculate:
-        calculation = PySCFMBXAS.load(checkpoint, runtime=runtime)
+        calculation = PySCFMBXAS.load(checkpoint)
         try:
             find_excitation(calculation)
         except RuntimeError:
-            calculation.excite(O_INDEX, config=excitation)
+            calculation.excite(
+                O_INDEX, excitation=excitation, fch_scf=scf,
+                runtime=runtime, logging=logging)
         return calculation
 
     structure_path = here.parent / STRUCTURE_NAME
     calculation = PySCFMBXAS(
         ase.io.read(structure_path),
-        config=CalculationConfig(
-            xc=XC, basis=BASIS, ground_state_scf=scf),
-        runtime=runtime)
-    calculation.run(O_INDEX, config=excitation)
+        calculation=CalculationConfig(xc=XC, basis=BASIS),
+        gs_scf=scf, checkpoint=checkpoint)
+    calculation.run(
+        O_INDEX, excitation=excitation, fch_scf=scf,
+        runtime=runtime, logging=logging)
     return calculation
 
 
@@ -302,13 +304,7 @@ def production_baseline(here, analysis_log):
         / "6fda_dftgeom_pbe_def2_svpd_gpu_maxvol.h5")
     if not checkpoint.exists():
         return None
-    calculation = PySCFMBXAS.load(
-        checkpoint,
-        runtime=RuntimeConfig(
-            work_directory=checkpoint.parent,
-            logging=LoggingConfig(
-                pymbxas_logfile=str(analysis_log), pyscf_verbosity=0,
-                pyscf_console=False)))
+    calculation = PySCFMBXAS.load(checkpoint)
     try:
         find_excitation(calculation)
     except RuntimeError:
@@ -356,12 +352,7 @@ def main():
             continue
         if any(state["label"] == method for state in states):
             continue
-        calculation = PySCFMBXAS.load(
-            checkpoint,
-            runtime=RuntimeConfig(
-                work_directory=checkpoint.parent,
-                logging=LoggingConfig(
-                    pyscf_verbosity=0, pyscf_console=False)))
+        calculation = PySCFMBXAS.load(checkpoint)
         validate_geometry(calculation, reference_structure, method)
         states.append(analyze_state(calculation, method))
 

@@ -189,26 +189,27 @@ def _run_maxvol_pymbxas(tmp_path, gpu, occupation_method="maxvol"):
     import ase.build
     from pymbxas.calculators.pyscf import PySCFMBXAS
     from pymbxas.config import (
-        CalculationConfig, CheckpointConfig, LoggingConfig, RuntimeConfig,
+        CalculationConfig, ExcitationConfig, LoggingConfig, RuntimeConfig,
         SCFConfig,
     )
 
     obj = PySCFMBXAS(
         ase.build.molecule("H2O"),
-        config=CalculationConfig(
-            xc="lda", basis="sto-3g",
-            ground_state_scf=SCFConfig(
-                max_cycles=50, convergence_tolerance=1e-8)),
-        runtime=RuntimeConfig(
-            work_directory=tmp_path, device="gpu" if gpu else "cpu",
-            logging=LoggingConfig(
-                pymbxas_verbosity=3,
-                pymbxas_logfile=f"{occupation_method}.log",
-                pyscf_verbosity=3, pyscf_console=False),
-            checkpoint=CheckpointConfig(enabled=False)),
+        calculation=CalculationConfig(xc="lda", basis="sto-3g"),
+        gs_scf=SCFConfig(max_cycles=50, convergence_tolerance=1e-8),
+        checkpoint=None,
     )
-    obj.run("O", occupation=occupation_method, mom_warmup_calls=2,
-            scf=SCFConfig(max_cycles=50, convergence_tolerance=1e-8))
+    obj.run(
+        "O", excitation=ExcitationConfig(
+            occupation=occupation_method, mom_warmup_calls=2),
+        fch_scf=SCFConfig(max_cycles=50, convergence_tolerance=1e-8),
+        xch_scf=SCFConfig(max_cycles=50, convergence_tolerance=1e-8),
+        runtime=RuntimeConfig(
+            work_directory=tmp_path, device="gpu" if gpu else "cpu"),
+        logging=LoggingConfig(
+            pymbxas_verbosity=3,
+            pymbxas_logfile=f"{occupation_method}.log",
+            pyscf_verbosity=3, pyscf_console=False))
     assert obj.excitations[0].config.occupation.value == occupation_method
     assert obj.excitations[0].config.mom_warmup_calls == 2
     assert len(obj.excitations) == 1
@@ -300,28 +301,24 @@ def test_adaptive_constrained_solver_gpu(tmp_path):
     import ase.build
     from pymbxas.calculators.pyscf import PySCFMBXAS
     from pymbxas.config import (
-        CalculationConfig, CheckpointConfig, LoggingConfig, RuntimeConfig,
+        CalculationConfig, ExcitationConfig, LoggingConfig, RuntimeConfig,
         SCFConfig,
     )
 
     obj = PySCFMBXAS(
         ase.build.molecule("H2O"),
-        config=CalculationConfig(
-            xc="lda", basis="sto-3g",
-            ground_state_scf=SCFConfig(
-                max_cycles=30, convergence_tolerance=1e-8)),
-        runtime=RuntimeConfig(
-            work_directory=tmp_path, device="gpu",
-            logging=LoggingConfig(
-                pymbxas_verbosity=3,
-                pymbxas_logfile="adaptive-gpu.log",
-                pyscf_verbosity=0, pyscf_console=False),
-            checkpoint=CheckpointConfig(enabled=False)))
+        calculation=CalculationConfig(xc="lda", basis="sto-3g"),
+        gs_scf=SCFConfig(max_cycles=30, convergence_tolerance=1e-8),
+        checkpoint=None)
     obj.run(
-        "O", xch=False, occupation="mixed",
-        scf=SCFConfig(
+        "O", excitation=ExcitationConfig(xch=False, occupation="mixed"),
+        fch_scf=SCFConfig(
             max_cycles=30, convergence_tolerance=1e-8,
-            diis_cycles=1, mixing_cycles=1, second_order=True))
+            diis_cycles=1, mixing_cycles=1, second_order=True),
+        runtime=RuntimeConfig(work_directory=tmp_path, device="gpu"),
+        logging=LoggingConfig(
+            pymbxas_verbosity=3, pymbxas_logfile="adaptive-gpu.log",
+            pyscf_verbosity=0, pyscf_console=False))
 
     assert len(obj.excitations) == 1
     log = (tmp_path / "adaptive-gpu.log").read_text()

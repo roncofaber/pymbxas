@@ -13,7 +13,10 @@ import os
 # self module utilities
 from pymbxas.io.data import pyscf_data
 from pymbxas.io import h5
-from pymbxas.config import CalculationConfig, ExcitationConfig, RuntimeConfig
+from pymbxas.config import (
+    CalculationConfig, CheckpointConfig, ExcitationConfig, LoggingConfig,
+    RuntimeConfig, SCFConfig, snapshot_config,
+)
 from pymbxas.io.config import (
     format_log_fields, log_scf_completion, with_log_context,
 )
@@ -109,7 +112,8 @@ def _validate_electron_counts(label, calculator):
     
 class Excitation(object):
     
-    def __init__(self, structure, gs_data, ato_idx, config):
+    def __init__(self, structure, gs_data, ato_idx, config,
+                 fch_scf, xch_scf):
         """Describe one excitation without executing electronic structure."""
         if not isinstance(config, ExcitationConfig):
             raise TypeError("config must be an ExcitationConfig")
@@ -117,7 +121,9 @@ class Excitation(object):
         # set up excitation info
         self.ato_idx = ato_idx
         self.symbol  = structure.get_chemical_symbols()[ato_idx]
-        self.config = config
+        self.config = snapshot_config(config, ExcitationConfig, "excitation")
+        self.fch_scf = snapshot_config(fch_scf, SCFConfig, "fch_scf")
+        self.xch_scf = snapshot_config(xch_scf, SCFConfig, "xch_scf")
         self.channel = config.channel_index
         
         # store output
@@ -141,12 +147,18 @@ class Excitation(object):
         # assign index of the orbital to excite
         self.orb_idx = orb_idx[0]
         
-    def run(self, structure, gs_data, calculation, runtime, df_obj, logger):
+    def run(self, structure, gs_data, calculation, runtime, logging_config,
+            checkpoint, df_obj, logger):
         """Execute FCH, optional XCH, and MBXAS for this request."""
         if not isinstance(calculation, CalculationConfig):
             raise TypeError("calculation must be a CalculationConfig")
         if not isinstance(runtime, RuntimeConfig):
             raise TypeError("runtime must be a RuntimeConfig")
+        if not isinstance(logging_config, LoggingConfig):
+            raise TypeError("logging_config must be a LoggingConfig")
+        if checkpoint is not None and not isinstance(
+                checkpoint, CheckpointConfig):
+            raise TypeError("checkpoint must be a CheckpointConfig or None")
         if self.data:
             raise RuntimeError("Excitation has already been run")
         import pymbxas
@@ -159,7 +171,8 @@ class Excitation(object):
         if runtime.is_gpu:
             gs_data = gs_data.to_gpu()
         self._excite(
-            structure, gs_data, calculation, df_obj, logger, runtime)
+            structure, gs_data, calculation, df_obj, logger, runtime,
+            logging_config, checkpoint)
         return self
 
     @classmethod
@@ -173,7 +186,11 @@ class Excitation(object):
             exc.channel = int(group.attrs["channel"])
             exc.orb_idx = int(group.attrs["orb_idx"])
             exc.config = ExcitationConfig.from_dict(
-                h5.read_json(group, "config"))
+                h5.read_json(group, "config")).snapshot()
+            exc.fch_scf = SCFConfig.from_dict(
+                h5.read_json(group, "fch_scf_config")).snapshot()
+            exc.xch_scf = SCFConfig.from_dict(
+                h5.read_json(group, "xch_scf_config")).snapshot()
             exc.provenance = h5.read_json(group, "provenance")
 
             names      = [name for name in ("fch", "xch") if name in group]
@@ -186,7 +203,8 @@ class Excitation(object):
         return exc
 
     # use it to run excitation of the selected atom
-    def _excite(self, structure, gs_data, calculation, df_obj, logger, runtime):
+    def _excite(self, structure, gs_data, calculation, df_obj, logger, runtime,
+                logging_config, checkpoint):
         logger.info("")
         site_logger = with_log_context(
             logger, site=f"{self.symbol}:{self.ato_idx}")
@@ -195,13 +213,15 @@ class Excitation(object):
         # run FCH
         self._run_fch(
             structure, gs_data, calculation, df_obj,
-            with_log_context(site_logger, stage="FCH"), runtime)
+            with_log_context(site_logger, stage="FCH"), runtime,
+            logging_config, checkpoint)
 
         # run XCH if enabled
         if self.config.xch:
             self._run_xch(
                 structure, gs_data, calculation, df_obj,
-                with_log_context(site_logger, stage="XCH"), runtime)
+                with_log_context(site_logger, stage="XCH"), runtime,
+                logging_config, checkpoint)
         else:
             with_log_context(site_logger, stage="XCH").info(
                 "Alignment skipped; returned energies are raw FCH eigenvalues")
@@ -214,7 +234,8 @@ class Excitation(object):
         return
     
     # run the FCH calculation
-    def _run_fch(self, structure, gs_data, calculation, df_obj, logger, runtime):
+    def _run_fch(self, structure, gs_data, calculation, df_obj, logger,
+                 runtime, logging_config, checkpoint):
         
         start_time = time.time()
         
@@ -226,10 +247,9 @@ class Excitation(object):
         xc        = calculation.xc
         solvent   = calculation.solvent
         calc_type = calculation.method
-        scf_config = self.config.resolved_fch_scf
+        scf_config = self.fch_scf
         occupation_method = self.config.occupation.value
         maxvol_warmup_calls = self.config.mom_warmup_calls
-        logging_config = runtime.logging
         logger.info("Starting calculation\n%s", format_log_fields({
             "occupation method": occupation_method,
             "MOM warm-up calls": (
@@ -273,7 +293,8 @@ class Excitation(object):
                                          calc_name=os.path.join(
                                              runtime.work_directory,
                                              f"{self.symbol}_{self.ato_idx}_fch"),
-                                         save=runtime.checkpoint.pyscf_chkfiles,
+                                         save=(checkpoint is not None and
+                                               checkpoint.pyscf_chkfiles),
                                          is_gpu=runtime.is_gpu,
                                          max_cycle=scf_config.max_cycles,
                                          conv_tol=scf_config.convergence_tolerance,
@@ -373,7 +394,8 @@ class Excitation(object):
         return
 
     # run the XCH calculation
-    def _run_xch(self, structure, gs_data, calculation, df_obj, logger, runtime):
+    def _run_xch(self, structure, gs_data, calculation, df_obj, logger,
+                 runtime, logging_config, checkpoint):
         
         start_time = time.time()
         
@@ -385,10 +407,9 @@ class Excitation(object):
         xc        = calculation.xc
         solvent   = calculation.solvent
         calc_type = calculation.method
-        scf_config = self.config.resolved_xch_scf
+        scf_config = self.xch_scf
         occupation_method = self.config.occupation.value
         maxvol_warmup_calls = self.config.mom_warmup_calls
-        logging_config = runtime.logging
         logger.info("Starting calculation\n%s", format_log_fields({
             "occupation method": occupation_method,
             "MOM warm-up calls": (
@@ -453,7 +474,8 @@ class Excitation(object):
                                          calc_name=os.path.join(
                                              runtime.work_directory,
                                              f"{self.symbol}_{self.ato_idx}_xch"),
-                                         save=runtime.checkpoint.pyscf_chkfiles,
+                                         save=(checkpoint is not None and
+                                               checkpoint.pyscf_chkfiles),
                                          is_gpu=runtime.is_gpu,
                                          max_cycle=scf_config.max_cycles,
                                          conv_tol=scf_config.convergence_tolerance,

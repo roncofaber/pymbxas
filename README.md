@@ -2,24 +2,18 @@
 
 [![PyPI version](https://badge.fury.io/py/pymbxas.svg)](https://badge.fury.io/py/pymbxas)
 
-PyMBXAS is a molecular many-body X-ray absorption spectroscopy package built
-on [PySCF](https://pyscf.org/) and the
-[Atomic Simulation Environment](https://wiki.fysik.dtu.dk/ase/). It runs a
-ground-state, full-core-hole, and optional excited-core-hole Delta-SCF
-workflow, then evaluates the one-body determinant MBXAS transition amplitude.
+PyMBXAS calculates molecular K-edge X-ray absorption spectra with PySCF. It combines unrestricted GS, FCH, and optional XCH calculations with determinant-based MBXAS transition amplitudes.
 
 Current scope:
 
-- unrestricted UKS or UHF molecular calculations;
-- all-electron K edges;
-- optional IBO or Boys localization of degenerate core orbitals;
-- XCH total-energy alignment;
-- HDF5 checkpoints that can be reopened and extended;
-- optional experimental overlap-weighted shake-up and spectator-spin
-  post-processing.
+- all-electron molecular UKS and UHF calculations;
+- IBO or Boys localization of degenerate core orbitals;
+- MOM or maxvol constrained-state tracking, with maxvol as the default;
+- HDF5 checkpoints that can be restarted and extended;
+- experimental f2/f3 shake-up, shake-down, and spectator contributions;
+- optional GPU execution through GPU4PySCF.
 
-Periodic MBXAS is deliberately unsupported because the molecular position
-operator used for transition dipoles is not periodic.
+Periodic MBXAS is not supported because the position operator used for transition dipoles is not periodic.
 
 ## Installation
 
@@ -27,269 +21,119 @@ operator used for transition dipoles is not periodic.
 pip install pymbxas
 ```
 
-Optional dependencies are grouped by feature:
+Optional features:
 
 ```bash
-pip install "pymbxas[gpu]"   # gpu4pyscf; requires a working CUDA device
-pip install "pymbxas[plot]"  # matplotlib plotting helper
-pip install "pymbxas[ml]"    # experimental explorer dependencies
+pip install "pymbxas[plot]"
+pip install "pymbxas[gpu]"
 ```
 
-To install the current development branch:
+Install the development branch with:
 
 ```bash
 pip install "git+https://github.com/roncofaber/pymbxas.git@dev"
 ```
 
-## Basic calculation
+## Quick start
 
 ```python
 import ase.build
 
-from pymbxas import (
-    CalculationConfig, CheckpointConfig, PySCFMBXAS, RuntimeConfig,
-    SCFConfig,
-)
+from pymbxas import CalculationConfig, PySCFMBXAS
 
 structure = ase.build.molecule("H2O")
+theory = CalculationConfig(xc="pbe", basis="def2-svpd")
 
 calc = PySCFMBXAS(
     structure,
-    config=CalculationConfig(xc="lda", basis="def2-svpd"),
-    runtime=RuntimeConfig(
-        device="cpu",
-        checkpoint=CheckpointConfig(filename="pymbxas.h5"),
-    ),
+    calculation=theory,
+    checkpoint="water.h5",
 )
+calc.run("O")
 
-calc.run(
-    "O",
-    occupation="maxvol",
-    scf=SCFConfig(max_cycles=150, convergence_tolerance=1e-6),
-)
 energy, intensity = calc.get_mbxas_spectra("O", sigma=0.5)
 ```
 
-For inexpensive convergence tests, PySCF controls belong in `SCFConfig`, for
-example `max_cycles=150`, `convergence_tolerance=1e-6`, and `grid_level=1`.
-Production calculations should restore a suitably converged basis, grid, and
-SCF tolerance.
+`run()` calculates the ground state if needed and then runs the requested excitations. Use `run_gs()` for only the ground state or `excite()` to add excitations to an existing ground state.
 
-Constrained FCH/XCH calculations use ordinary DIIS followed, if necessary, by
-a short stabilized-DIIS stage within `max_cycles`. The recovery stage
-defaults to 0.2 damping and a 0.2 Ha virtual level shift; it restarts from the
-lowest-gradient orbitals seen so far while continuing to apply MOM/maxvol.
-`diis_cycles`, `mixing_cycles`, `damping`, and `level_shift` expose these
-choices. Second-order SCF is disabled for constrained states by
-default because its continuous orbital rotations do not reapply the
-occupation controller. `second_order=True` is available only as an
-explicit diagnostic override.
+## Configuration
 
-FCH and XCH state tracking is selected through `occupation`. The recommended
-and default `"maxvol"` controller selects the occupied subspace by its
-collective overlap determinant from the first occupation call. `"mom"` uses
-PySCF MOM, while `"mixed"` optionally uses MOM for `mom_warmup_calls` calls
-before switching to maxvol. These alternatives are retained for diagnostics
-and state comparisons; they are not the production recommendation. For FCH the
-reference is the GS orbitals with the selected core occupation removed; for
-XCH it is the converged FCH orbitals with the spectator occupation added.
-Each excitation stores its resolved method, warm-up count, and FCH/XCH solver
-settings in HDF5.
-At normal verbosity, every SCF reports its solver path, cycles, final energy, electron
-counts, validation overlaps, and elapsed time. FCH records also report
-`<S^2>`, spin contamination, the occupied determinant overlap, and the
-minimum target/current occupied-space singular value. Maxvol and mixed calculations
-add one aggregate occupation record with their call count, determinant swaps,
-occupied-orbital changes, last changing call, and selector time. Detailed
-per-call maxvol records remain available at PySCF debug verbosity.
-Occupation changes themselves are emitted immediately at PySCF INFO verbosity
-so that a live log distinguishes state switching from density-mixing failure.
+Configuration is separated by responsibility instead of nested at the script level:
 
-Logfile paths are resolved relative to `RuntimeConfig.work_directory`. Starting
-a new calculation replaces logs with those names; reopening an HDF5
-calculation appends restart activity. Reconfiguring PyMBXAS logging preserves
-handlers installed by the calling application. Each raw PySCF block begins
-with a structured header identifying its GS/FCH/XCH stage and, where relevant,
-the atom, spin channel, theory, occupation controller, and device.
-High-level console records use compact timestamps and full level names. Log
-files additionally include the date and originating module. Scientific
-summaries are printed as aligned, tab-indented blocks, with long field values
-wrapped beneath their value column.
-
-`energy` is returned in eV. The stored `absorption` arrays are Cartesian
-transition amplitudes, not intensities; the spectrum applies the photon-energy
-prefactor and isotropic Cartesian average before broadening.
-
-## Restarting from HDF5
+| Class | Responsibility |
+|---|---|
+| `CalculationConfig` | Electronic model shared by GS, FCH, and XCH |
+| `SCFConfig` | Solver controls supplied as `gs_scf`, `fch_scf`, or `xch_scf` |
+| `ExcitationConfig` | Spin channel, XCH alignment, and occupation tracking |
+| `RuntimeConfig` | Device and working directory for one execution |
+| `LoggingConfig` | PyMBXAS and raw PySCF logging for one execution |
+| `CheckpointConfig` | Advanced checkpoint and PySCF artifact policy |
 
 ```python
-from pymbxas import LoggingConfig, PySCFMBXAS, RuntimeConfig
-
-# Loading restores scientific inputs exactly; runtime diagnostics may change.
-calc = PySCFMBXAS.load(
-    "pymbxas.h5",
-    runtime=RuntimeConfig(
-        logging=LoggingConfig(pyscf_verbosity=4),
-    ),
+from pymbxas import (
+    ExcitationConfig,
+    LoggingConfig,
+    RuntimeConfig,
+    SCFConfig,
 )
-calc.excite("N", occupation="maxvol")
-```
 
-The ground-state portion follows PySCF's checkpoint layout, so
-`pyscf.scf.chkfile.load_scf` and `mf.from_chk` can read it. Legacy `.pkl`
-calculations from version 0.5 and earlier are not supported.
+gs_scf = SCFConfig(max_cycles=120)
+fch_scf = gs_scf.copy().set(mixing_cycles=30)
+xch_scf = fch_scf.copy()
 
-## Experimental many-body satellites
-
-The default spectrum is spin-complete f1: the excited-channel amplitude is
-multiplied by the spectator channel's zero-order determinant weight. Request a
-single higher total order to add all terms at that order:
-
-```python
-energy, corrected = calc.get_mbxas_spectra(
+calc = PySCFMBXAS(
+    structure,
+    calculation=theory,
+    gs_scf=gs_scf,
+    checkpoint="calculation.h5",
+)
+calc.run(
     "O",
-    sigma=0.5,
-    f_order=2,
+    excitation=ExcitationConfig(occupation="maxvol"),
+    fch_scf=fch_scf,
+    xch_scf=xch_scf,
+    runtime=RuntimeConfig(device="gpu", work_directory="outputs"),
+    logging=LoggingConfig(pyscf_logfile="pyscf.log"),
 )
 ```
 
-- `f_order=1` returns f1, `f_order=2` returns f1+f2/MB2 including both `20`
-  and spectator `11`, and `f_order=3` also adds all f3/MB3 terms.
-- The spectator construction follows `f_order` automatically and the sum of
-  the two channel extra-pair orders is capped consistently.
-- `spectator_order` and `max_total_order` remain advanced diagnostic
-  overrides. Explicit `spectator_order=None` omits the opposite-spin factor.
-- Physical spectra always include both shake-up and shake-down configurations.
-  `get_mbxas_decomposition()` resolves each higher-order contribution into those
-  two constituent-level classes under `decomposition["decomposition"]`.
+Configurations support validated `.set()` updates and independent `.copy()` variants. A calculator snapshots its inputs, so changing a template later does not alter an existing calculation.
 
-The determinant formulas follow `mbxas-qe`, but PyMBXAS enumerates them exactly
-for small validation problems and uses QE-style adaptive `K`-element screening
-for production MB2 spectra. Production f2 uses the complete occupied and
-virtual FCH manifolds, pruned by the requested spectral energy window rather
-than positional orbital cutoffs. Both the excited-channel MB3 `30` and
-spectator-double `12` parts of f3 use their corresponding QE adaptive
-product-threshold searches. Higher orders remain exact and protected by a
-configuration-count guard. See [dev/shakeup.md](dev/shakeup.md).
-
-PyMBXAS applies `sigma` once to each complete final-state transition. QE
-broadens both spin factors before convolution; compare Gaussian calculations
-using `sigma_PyMBXAS = sqrt(2) * sigma_QE`.
-
-For diagnostics and plotting:
+## Restart and analysis
 
 ```python
+calc = PySCFMBXAS.load("calculation.h5")
+calc.excite("N")
+
 spectra = calc.to_spectra(index=0)
-decomposition = spectra.get_mbxas_decomposition(
-    f_order=2,
-    sigma=0.5,
-)
-
-f2_shakeup = decomposition["decomposition"][2]["shakeup"]
-f2_shakedown = decomposition["decomposition"][2]["shakedown"]
-captured_overlap = decomposition["overlap"]["fraction"]
-spectra.print_mbxas_summary(decomposition)
-
-from pymbxas.plotting import plot_mbxas_decomposition
-figure, axes = plot_mbxas_decomposition(
-    decomposition,
-    show_resolved=True,
-    show_cumulative=True,
-)
-
-# Or calculate and plot one site directly:
 figure, axes = spectra.plot_mbxas_decomposition(
     f_order=2,
     sigma=0.5,
+    erange=(525, 555),
     show_resolved=True,
 )
-
-# Collections use the same schema. Their default is a mean; use a sum for
-# independent absorbing sites.
-collection_data = collection.get_mbxas_decomposition(
-    f_order=2, sigma=0.5, average=False)
-figure, axes = collection.plot_mbxas_decomposition(
-    f_order=2, sigma=0.5, average=False, show_resolved=True)
 ```
 
-The main panel contains the physical total and each f-order contribution.
-`show_cumulative=True` adds distinct intermediate cumulative curves, while
-`show_resolved=True` adds a panel partitioning every higher order into its
-shake-up and shake-down parts. The optional overlap-probability panel remains
-enabled by default. Matplotlib is imported only when plotting is requested.
+Calculation checkpoints store the electronic model and the exact GS, FCH, and XCH solver configurations. Pass `checkpoint=None` to disable automatic checkpointing.
 
-GS-to-FCH orbital rearrangement diagrams are available for each site:
+## Documentation
 
-```python
-data = spectra.get_orbital_rearrangement(
-    energy_window=(-15, 15),  # eV relative to the global GS HOMO
-    min_overlap=0.05,
-)
-figure, axes = spectra.plot_orbital_rearrangement(
-    energy_window=(-15, 15), min_overlap=0.05, show_indices=True,
-    show_dos=True, dos_sigma=0.25)
-```
-
-Alpha and beta appear in separate panels. Occupied levels use dark strokes and
-unoccupied levels use lighter strokes; HOMO, LUMO, and the excited
-core/core-hole pair are highlighted. In the FCH excited channel, the
-constrained core hole is tracked separately and excluded when identifying the
-ordinary LUMO. Dashed lines maximize the final squared GS-FCH MO overlap
-under a global one-to-one assignment, and their opacity indicates confidence.
-They are not a unique orbital identity inside a mixed or degenerate subspace.
-Optional Gaussian-broadened orbital-level densities occupy only the unused
-outer margins: GS extends left and FCH extends right, with a common scale
-within each spin panel.
-The default frontier window avoids compressing valence levels against the deep
-core; use `include_core=True` or a wider window to include it.
-
-Standalone `Spectra` files written before GS orbital energies were persisted
-still load and produce spectra, but cannot make this diagram. Load the original
-calculation checkpoint and call `to_spectra()` to recover the energies without
-rerunning SCF.
-
-The `examples/6fda_shakeup_compare.py` workflow writes artifacts by type under
-`outputs/`: calculation checkpoints, logs, numerical spectrum data, spectrum
-figures, and one GS-FCH orbital figure per oxygen site each have dedicated
-subdirectories. It explicitly uses `6fda-dam_relaxed_dft.xyz`, tags new
-checkpoints with `dftgeom`, defaults to direct maxvol, and disables
-second-order recovery. Geometry validation prevents a checkpoint from the
-other 6fda structure from being reused accidentally. PBE is the production
-default; `--xc b3lyp` runs an otherwise identical B3LYP/def2-SVPD comparison
-with independent artifacts.
+- [Method, conventions, and approximations](dev/method.md)
+- [Shake-up, shake-down, and comparison with `mbxas-qe`](dev/shakeup.md)
+- [Architecture, configuration lifecycle, GPU path, and HDF5 schema](dev/architecture.md)
+- [6fda production example](examples/6fda_shakeup_compare.py)
+- [Contributing](CONTRIBUTING.md)
 
 ## Command line
 
 ```bash
-mbxas structure.xyz --to_excite O --output_file spectrum.h5 \
-  --kernel_kwargs '{"xc":"lda","basis":"def2-svpd","gpu":false}'
+mbxas structure.xyz --sites O -o spectrum.h5 \
+  --calculation-config '{"xc":"pbe","basis":"def2-svpd"}' \
+  --checkpoint calculation.h5
 ```
 
-The command writes a `Spectra` or `Spectras` HDF5 file.
-
-## Development documentation
-
-- [AGENTS.md](AGENTS.md): contributor and coding-agent instructions.
-- [dev/method.md](dev/method.md): established MBXAS equations, conventions,
-  approximations, and reference values.
-- [dev/shakeup.md](dev/shakeup.md): exact experimental satellite behavior and
-  the comparison with `mbxas-qe`.
-- [dev/architecture.md](dev/architecture.md): modules, objects, persistence,
-  GPU boundaries, and extension points.
-- [CONTRIBUTING.md](CONTRIBUTING.md): testing and changelog workflow.
+Run `mbxas --help` for the separate runtime, logging, excitation, and GS/FCH/XCH SCF options.
 
 ## References
 
-- Liang et al., *Accurate x-ray spectral predictions: an advanced
-  self-consistent-field approach inspired by many-body perturbation theory*,
-  PRL 118, 096402 (2017).
-- Liang and Prendergast, *Quantum many-body effects in x-ray spectra
-  efficiently computed using a basic graph algorithm*, PRB 97, 205127 (2018).
-- Liang and Prendergast, *Taming convergence in the determinant approach for
-  x-ray excitation spectra*, PRB 100, 075121 (2019).
-- Roychoudhury and Prendergast, *Efficient core-excited state orbital
-  perspective on calculating x-ray absorption transitions in determinant
-  framework*, PRB 107, 035146 (2023).
-
-The `explorer/` Gaussian-process subsystem remains experimental and is not on
-the core MBXAS execution path.
+The method follows Liang and Prendergast, PRL 118, 096402 (2017); PRB 97, 205127 (2018); PRB 100, 075121 (2019); and Roychoudhury and Prendergast, PRB 107, 035146 (2023).

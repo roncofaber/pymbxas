@@ -375,14 +375,13 @@ def tiny_calc(tmp_path_factory):
     workdir = tmp_path_factory.mktemp("tiny")
     obj = PySCFMBXAS(
         ase.build.molecule("H2O"),
-        config=CalculationConfig(xc="lda", basis="sto-3g"),
-        runtime=RuntimeConfig(
-            work_directory=workdir,
-            logging=LoggingConfig(
-                pymbxas_verbosity=1, pyscf_verbosity=0,
-                pyscf_console=False),
-            checkpoint=CheckpointConfig(enabled=False)))
-    obj.run("O")
+        calculation=CalculationConfig(xc="lda", basis="sto-3g"),
+        checkpoint=None)
+    obj.run(
+        "O", runtime=RuntimeConfig(work_directory=workdir),
+        logging=LoggingConfig(
+            pymbxas_verbosity=1, pyscf_verbosity=0,
+            pyscf_console=False))
     return obj
 
 
@@ -408,12 +407,19 @@ def test_save_writes_configs_and_chkfile_shaped_root(tiny_calc, tmp_path):
         assert int(exc.attrs["orb_idx"]) == tiny_calc.excitations[0].orb_idx
         assert bool(exc.attrs["complete"]) is True
         assert set(exc) == {
-            "config", "provenance", "fch", "xch", "mbxas"}
+            "config", "fch_scf_config", "xch_scf_config", "provenance",
+            "fch", "xch", "mbxas"}
         assert set(exc["mbxas"]) == {"energies", "absorption", "mb_overlap",
                                      "dipole_KS", "basis_ovlp"}
         assert h5.read_text(exc["fch"], "output").startswith("")
-        assert h5.read_json(f, "calculation_config") == tiny_calc.config.to_dict()
+        assert h5.read_json(
+            f, "calculation_config") == tiny_calc.calculation.to_dict()
+        assert h5.read_json(f, "gs_scf_config") == tiny_calc.gs_scf.to_dict()
         assert h5.read_json(exc, "config") == tiny_calc.excitations[0].config.to_dict()
+        assert h5.read_json(
+            exc, "fch_scf_config") == tiny_calc.excitations[0].fch_scf.to_dict()
+        assert h5.read_json(
+            exc, "xch_scf_config") == tiny_calc.excitations[0].xch_scf.to_dict()
         assert h5.read_json(f, "ground_state_provenance")["device"] == "cpu"
         assert h5.read_json(exc, "provenance")["device"] == "cpu"
         assert h5.read_structure(f, "structure") == tiny_calc.structure
@@ -469,8 +475,7 @@ def test_save_requires_a_ground_state(tmp_path):
 
     obj = PySCFMBXAS(
         ase.build.molecule("H2O"),
-        config=CalculationConfig(basis="sto-3g"),
-        runtime=RuntimeConfig(work_directory=tmp_path))
+        calculation=CalculationConfig(basis="sto-3g"), checkpoint=None)
 
     with pytest.raises(RuntimeError, match="ground state"):
         obj.save()
@@ -485,7 +490,8 @@ def test_load_restores_the_ground_state(tiny_calc, tmp_path):
     assert back._ran_GS is True
     assert back._used_loc is False
     assert back.df_obj is None
-    assert back.config == tiny_calc.config
+    assert back.calculation == tiny_calc.calculation
+    assert back.gs_scf == tiny_calc.gs_scf
     assert back.structure == tiny_calc.structure
     assert np.array_equal(back.gs_data.mo_coeff, tiny_calc.gs_data.mo_coeff)
     assert np.array_equal(back.gs_data.mo_occ, tiny_calc.gs_data.mo_occ)
@@ -496,22 +502,22 @@ def test_load_restores_the_ground_state(tiny_calc, tmp_path):
     assert back.logger is not None
 
 
-def test_load_accepts_runtime_but_not_scientific_overrides(tiny_calc, tmp_path):
+def test_load_uses_checkpoint_directory_until_execution_override(tiny_calc, tmp_path):
     from pymbxas.calculators.pyscf import PySCFMBXAS
     from pymbxas.config import LoggingConfig, RuntimeConfig
 
     path = tiny_calc.save(tmp_path / "verbosity.h5")
     analysis_log = tmp_path / "analysis.log"
-    runtime = RuntimeConfig(
-        work_directory=tmp_path,
-        logging=LoggingConfig(
-            pymbxas_logfile=analysis_log, pyscf_verbosity=4,
-            pyscf_console=False))
-    back = PySCFMBXAS.load(path, runtime=runtime)
+    runtime = RuntimeConfig(work_directory=tmp_path)
+    runtime_logging = LoggingConfig(
+        pymbxas_logfile=analysis_log, pyscf_verbosity=4,
+        pyscf_console=False)
+    back = PySCFMBXAS.load(path)
+    assert back.runtime.work_directory == str(tmp_path)
+    back._prepare_execution(runtime, runtime_logging)
 
-    assert back.mol.verbose == 4
-    assert back.runtime.logging.pymbxas_logfile == str(analysis_log)
-    assert back.config == tiny_calc.config
+    assert back.logging.pymbxas_logfile == str(analysis_log)
+    assert back.calculation == tiny_calc.calculation
 
 
 def test_load_restores_excitations_lazily(tiny_calc, tmp_path):
@@ -530,6 +536,8 @@ def test_load_restores_excitations_lazily(tiny_calc, tmp_path):
     assert exc.channel == ref.channel
     assert exc.orb_idx == ref.orb_idx
     assert exc.config == ref.config
+    assert exc.fch_scf == ref.fch_scf
+    assert exc.xch_scf == ref.xch_scf
     assert exc.provenance == ref.provenance
     assert set(exc.data) == {"fch", "xch"}
     assert "mo_coeff" not in vars(exc.data["fch"])
@@ -552,8 +560,7 @@ def test_loaded_object_skips_a_finished_atom(tiny_calc, tmp_path):
 
 def test_same_site_with_different_config_is_retained(tiny_calc, tmp_path,
                                                      monkeypatch):
-    from dataclasses import replace
-    from pymbxas.config import CheckpointConfig, ExcitationConfig
+    from pymbxas.config import ExcitationConfig
     from pymbxas.calculators.pyscf import PySCFMBXAS
     from pymbxas.calculators.excitation import Excitation
 
@@ -561,10 +568,9 @@ def test_same_site_with_different_config_is_retained(tiny_calc, tmp_path,
     back = PySCFMBXAS.load(path)
     original = back.excitations[0]
     variant = ExcitationConfig(channel="alpha")
-    back.runtime = replace(
-        back.runtime, checkpoint=CheckpointConfig(enabled=False))
+    back._checkpoint = None
     monkeypatch.setattr(Excitation, "run", lambda self, *args: self)
-    outcomes = back.excite(0, config=variant)
+    outcomes = back.excite(0, excitation=variant)
     assert outcomes[0].status == "succeeded"
     assert back.excitations[-1].config == variant
     assert original.config.channel.value == "beta"
@@ -616,7 +622,7 @@ def test_force_ground_state_rerun_is_refused_after_load(tiny_calc, tmp_path):
     back = PySCFMBXAS.load(path)
 
     with pytest.raises(RuntimeError, match="excitations"):
-        back.run_ground_state(force=True)
+        back.run_gs(force=True)
 
 
 def test_flat_constructor_keywords_are_gone():
@@ -624,7 +630,7 @@ def test_flat_constructor_keywords_are_gone():
     from pymbxas.calculators.pyscf import PySCFMBXAS
 
     assert tuple(inspect.signature(PySCFMBXAS.__init__).parameters) == (
-        "self", "structure", "config", "runtime")
+        "self", "structure", "calculation", "gs_scf", "checkpoint")
 
 
 def test_dill_is_gone_from_the_package():

@@ -1,6 +1,6 @@
 """Validated, serializable configuration for PyMBXAS calculations."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, fields
 from enum import Enum
 import os
 from pathlib import Path
@@ -14,8 +14,6 @@ from pymbxas.calculators.scf import normalize_scf_recovery_settings
 
 
 class SpinChannel(str, Enum):
-    """Unrestricted spin channel used for the core excitation."""
-
     ALPHA = "alpha"
     BETA = "beta"
 
@@ -42,8 +40,6 @@ class SpinChannel(str, Enum):
 
 
 class OccupationMethod(str, Enum):
-    """Available constrained-SCF occupation controllers."""
-
     MOM = "mom"
     MAXVOL = "maxvol"
     MIXED = "mixed"
@@ -75,22 +71,70 @@ class Device(str, Enum):
         raise ValueError("device must be 'cpu' or 'gpu'")
 
 
+class _ConfigTemplate:
+    """Controlled mutable template with immutable calculator snapshots."""
+
+    __hash__ = None
+
+    def __eq__(self, other):
+        if type(self) is not type(other):
+            return NotImplemented
+        return all(
+            getattr(self, item.name) == getattr(other, item.name)
+            for item in fields(self))
+
+    def set(self, **changes):
+        """Validate and apply changes transactionally, then return ``self``."""
+        if getattr(self, "_is_snapshot", False):
+            raise TypeError(
+                f"{type(self).__name__} is a calculator-owned snapshot; "
+                "modify a copy and construct a new calculation instead")
+        values = self.to_dict()
+        unknown = set(changes) - {item.name for item in fields(self)}
+        if unknown:
+            raise ValueError(
+                "Unknown {} field(s): {}".format(
+                    type(self).__name__, ", ".join(sorted(unknown))))
+        values.update(changes)
+        candidate = type(self).from_dict(values)
+        for item in fields(self):
+            object.__setattr__(self, item.name, getattr(candidate, item.name))
+        return self
+
+    def copy(self, **changes):
+        """Return an independent, editable configuration template."""
+        result = type(self).from_dict(self.to_dict())
+        if changes:
+            result.set(**changes)
+        return result
+
+    def snapshot(self):
+        """Return an immutable copy suitable for calculator ownership."""
+        result = self.copy()
+        object.__setattr__(result, "_is_snapshot", True)
+        return result
+
+    @property
+    def is_snapshot(self):
+        return bool(getattr(self, "_is_snapshot", False))
+
+
 def _positive_number(name, value, *, allow_none=False):
     if value is None and allow_none:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         qualifier = "a positive number or None" if allow_none else "a positive number"
-        raise ValueError("{} must be {}".format(name, qualifier))
+        raise ValueError(f"{name} must be {qualifier}")
     if value <= 0:
         qualifier = "positive or None" if allow_none else "positive"
-        raise ValueError("{} must be {}".format(name, qualifier))
+        raise ValueError(f"{name} must be {qualifier}")
     return float(value)
 
 
 def _strict_mapping(cls, values):
     if not isinstance(values, Mapping):
-        raise TypeError("{} configuration must be a mapping".format(cls.__name__))
-    allowed = set(cls.__dataclass_fields__)
+        raise TypeError(f"{cls.__name__} configuration must be a mapping")
+    allowed = {item.name for item in fields(cls)}
     unknown = set(values) - allowed
     if unknown:
         raise ValueError(
@@ -99,13 +143,9 @@ def _strict_mapping(cls, values):
     return dict(values)
 
 
-@dataclass(frozen=True)
-class SCFConfig:
-    """SCF convergence and recovery policy.
-
-    Ground-state calculations use the common convergence fields. Constrained
-    FCH/XCH calculations additionally use the DIIS/mixing recovery fields.
-    """
+@dataclass(frozen=True, eq=False)
+class SCFConfig(_ConfigTemplate):
+    """SCF convergence and constrained-state recovery policy."""
 
     max_cycles: int = 100
     convergence_tolerance: Optional[float] = None
@@ -117,23 +157,19 @@ class SCFConfig:
     second_order: bool = False
 
     def __post_init__(self):
-        if isinstance(self.max_cycles, bool) or not isinstance(self.max_cycles, int):
+        if (isinstance(self.max_cycles, bool)
+                or not isinstance(self.max_cycles, int)
+                or self.max_cycles < 1):
             raise ValueError("max_cycles must be a positive integer")
-        if self.max_cycles < 1:
-            raise ValueError("max_cycles must be a positive integer")
-
         tolerance = _positive_number(
             "convergence_tolerance", self.convergence_tolerance,
             allow_none=True)
-        if tolerance is not None:
-            object.__setattr__(self, "convergence_tolerance", tolerance)
-
-        if self.grid_level is not None:
-            if (isinstance(self.grid_level, bool)
-                    or not isinstance(self.grid_level, int)
-                    or self.grid_level < 0):
-                raise ValueError("grid_level must be a non-negative integer or None")
-
+        object.__setattr__(self, "convergence_tolerance", tolerance)
+        if self.grid_level is not None and (
+                isinstance(self.grid_level, bool)
+                or not isinstance(self.grid_level, int)
+                or self.grid_level < 0):
+            raise ValueError("grid_level must be a non-negative integer or None")
         recovery = normalize_scf_recovery_settings(
             self.diis_cycles, self.mixing_cycles, self.damping,
             self.level_shift, self.second_order)
@@ -144,25 +180,16 @@ class SCFConfig:
         object.__setattr__(self, "second_order", recovery["scf_second_order"])
 
     def to_dict(self):
-        return {
-            "max_cycles": self.max_cycles,
-            "convergence_tolerance": self.convergence_tolerance,
-            "grid_level": self.grid_level,
-            "diis_cycles": self.diis_cycles,
-            "mixing_cycles": self.mixing_cycles,
-            "damping": self.damping,
-            "level_shift": self.level_shift,
-            "second_order": self.second_order,
-        }
+        return {item.name: getattr(self, item.name) for item in fields(self)}
 
     @classmethod
     def from_dict(cls, values):
         return cls(**_strict_mapping(cls, values))
 
 
-@dataclass(frozen=True)
-class CalculationConfig:
-    """Immutable settings defining the ground-state calculation."""
+@dataclass(frozen=True, eq=False)
+class CalculationConfig(_ConfigTemplate):
+    """Electronic-structure model shared by GS, FCH, and XCH."""
 
     charge: int = 0
     spin: int = 0
@@ -172,13 +199,12 @@ class CalculationConfig:
     solvent: Optional[float] = None
     pbc: Optional[bool] = None
     localization: str = "ibo"
-    ground_state_scf: SCFConfig = field(default_factory=SCFConfig)
 
     def __post_init__(self):
         for name in ("charge", "spin"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
-                raise ValueError("{} must be an integer".format(name))
+                raise ValueError(f"{name} must be an integer")
         if not isinstance(self.basis, str) or not self.basis.strip():
             raise ValueError("basis must be a non-empty string")
         object.__setattr__(self, "basis", self.basis.strip())
@@ -202,34 +228,85 @@ class CalculationConfig:
             raise ValueError(
                 "localization must be 'ibo', 'ibom', 'boys', or 'boysm'")
         object.__setattr__(self, "localization", localization)
-        if not isinstance(self.ground_state_scf, SCFConfig):
-            raise TypeError("ground_state_scf must be an SCFConfig")
+
+    def to_dict(self):
+        return {item.name: getattr(self, item.name) for item in fields(self)}
+
+    @classmethod
+    def from_dict(cls, values):
+        return cls(**_strict_mapping(cls, values))
+
+
+@dataclass(frozen=True, eq=False)
+class ExcitationConfig(_ConfigTemplate):
+    """Physical definition of a core-excitation request."""
+
+    channel: SpinChannel = SpinChannel.BETA
+    xch: bool = True
+    occupation: OccupationMethod = OccupationMethod.MAXVOL
+    mom_warmup_calls: int = 2
+
+    def __post_init__(self):
+        object.__setattr__(self, "channel", SpinChannel.normalize(self.channel))
+        if not isinstance(self.xch, bool):
+            raise ValueError("xch must be a boolean")
+        object.__setattr__(
+            self, "occupation", OccupationMethod.normalize(self.occupation))
+        try:
+            warmup_calls = normalize_maxvol_warmup_calls(self.mom_warmup_calls)
+        except ValueError as error:
+            raise ValueError(
+                "mom_warmup_calls must be a positive integer") from error
+        object.__setattr__(self, "mom_warmup_calls", warmup_calls)
+
+    @property
+    def channel_index(self):
+        return self.channel.index
 
     def to_dict(self):
         return {
-            "charge": self.charge,
-            "spin": self.spin,
-            "xc": self.xc,
-            "basis": self.basis,
-            "method": self.method,
-            "solvent": self.solvent,
-            "pbc": self.pbc,
-            "localization": self.localization,
-            "ground_state_scf": self.ground_state_scf.to_dict(),
+            "channel": self.channel.value,
+            "xch": self.xch,
+            "occupation": self.occupation.value,
+            "mom_warmup_calls": self.mom_warmup_calls,
         }
 
     @classmethod
     def from_dict(cls, values):
-        values = _strict_mapping(cls, values)
-        if "ground_state_scf" in values:
-            values["ground_state_scf"] = SCFConfig.from_dict(
-                values["ground_state_scf"])
-        return cls(**values)
+        return cls(**_strict_mapping(cls, values))
 
 
-@dataclass(frozen=True)
-class LoggingConfig:
-    """Console and logfile settings for one execution session."""
+@dataclass(frozen=True, eq=False)
+class RuntimeConfig(_ConfigTemplate):
+    """Execution device and working-directory settings for one call."""
+
+    work_directory: str = "."
+    device: Device = Device.CPU
+
+    def __post_init__(self):
+        object.__setattr__(
+            self, "work_directory",
+            os.path.abspath(os.fspath(self.work_directory)))
+        object.__setattr__(self, "device", Device.normalize(self.device))
+
+    @property
+    def is_gpu(self):
+        return self.device is Device.GPU
+
+    def to_dict(self):
+        return {
+            "work_directory": self.work_directory,
+            "device": self.device.value,
+        }
+
+    @classmethod
+    def from_dict(cls, values):
+        return cls(**_strict_mapping(cls, values))
+
+
+@dataclass(frozen=True, eq=False)
+class LoggingConfig(_ConfigTemplate):
+    """Console and logfile settings for one execution call."""
 
     pymbxas_verbosity: int = 3
     pymbxas_logfile: Optional[str] = None
@@ -244,8 +321,7 @@ class LoggingConfig:
             if (isinstance(value, bool) or not isinstance(value, int)
                     or not lower <= value <= upper):
                 raise ValueError(
-                    "{} must be an integer from {} to {}".format(
-                        name, lower, upper))
+                    f"{name} must be an integer from {lower} to {upper}")
         if not isinstance(self.pyscf_console, bool):
             raise ValueError("pyscf_console must be a boolean")
         for name in ("pymbxas_logfile", "pyscf_logfile"):
@@ -254,43 +330,35 @@ class LoggingConfig:
                 object.__setattr__(self, name, os.fspath(value))
 
     def to_dict(self):
-        return {
-            "pymbxas_verbosity": self.pymbxas_verbosity,
-            "pymbxas_logfile": self.pymbxas_logfile,
-            "pyscf_verbosity": self.pyscf_verbosity,
-            "pyscf_logfile": self.pyscf_logfile,
-            "pyscf_console": self.pyscf_console,
-        }
+        return {item.name: getattr(self, item.name) for item in fields(self)}
 
     @classmethod
     def from_dict(cls, values):
         return cls(**_strict_mapping(cls, values))
 
 
-@dataclass(frozen=True)
-class CheckpointConfig:
-    """Checkpoint and optional PySCF artifact policy."""
+@dataclass(frozen=True, eq=False)
+class CheckpointConfig(_ConfigTemplate):
+    """Checkpoint path and optional PySCF artifact policy."""
 
-    enabled: bool = True
-    filename: str = "pymbxas.h5"
+    path: str = "pymbxas.h5"
     pyscf_chkfiles: bool = False
     fchk_files: bool = False
 
     def __post_init__(self):
-        for name in ("enabled", "pyscf_chkfiles", "fchk_files"):
+        for name in ("pyscf_chkfiles", "fchk_files"):
             if not isinstance(getattr(self, name), bool):
-                raise ValueError("{} must be a boolean".format(name))
-        filename = os.fspath(self.filename)
-        if not filename or Path(filename).name != filename:
-            raise ValueError("filename must be a file name without a directory")
-        if not filename.endswith(".h5"):
-            filename = os.path.splitext(filename)[0] + ".h5"
-        object.__setattr__(self, "filename", filename)
+                raise ValueError(f"{name} must be a boolean")
+        path = os.fspath(self.path)
+        if not path:
+            raise ValueError("path must be a non-empty HDF5 file path")
+        if Path(path).suffix.lower() not in {".h5", ".hdf5"}:
+            raise ValueError("checkpoint path must end in .h5 or .hdf5")
+        object.__setattr__(self, "path", path)
 
     def to_dict(self):
         return {
-            "enabled": self.enabled,
-            "filename": self.filename,
+            "path": self.path,
             "pyscf_chkfiles": self.pyscf_chkfiles,
             "fchk_files": self.fchk_files,
         }
@@ -300,154 +368,17 @@ class CheckpointConfig:
         return cls(**_strict_mapping(cls, values))
 
 
-@dataclass(frozen=True)
-class RuntimeConfig:
-    """Mutable-session concerns kept outside scientific configuration."""
-
-    work_directory: str = "."
-    device: Device = Device.CPU
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
-    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
-
-    def __post_init__(self):
-        object.__setattr__(
-            self, "work_directory", os.path.abspath(os.fspath(self.work_directory)))
-        object.__setattr__(self, "device", Device.normalize(self.device))
-        if not isinstance(self.logging, LoggingConfig):
-            raise TypeError("logging must be a LoggingConfig")
-        if not isinstance(self.checkpoint, CheckpointConfig):
-            raise TypeError("checkpoint must be a CheckpointConfig")
-
-    @property
-    def is_gpu(self):
-        return self.device is Device.GPU
-
-    @property
-    def checkpoint_path(self):
-        return os.path.join(
-            self.work_directory, self.checkpoint.filename)
-
-    def to_dict(self):
-        return {
-            "work_directory": self.work_directory,
-            "device": self.device.value,
-            "logging": self.logging.to_dict(),
-            "checkpoint": self.checkpoint.to_dict(),
-        }
-
-    @classmethod
-    def from_dict(cls, values):
-        values = _strict_mapping(cls, values)
-        if "logging" in values:
-            values["logging"] = LoggingConfig.from_dict(values["logging"])
-        if "checkpoint" in values:
-            values["checkpoint"] = CheckpointConfig.from_dict(
-                values["checkpoint"])
-        return cls(**values)
-
-
-@dataclass(frozen=True)
-class ExcitationConfig:
-    """Settings shared by one or more core-excitation requests.
-
-    ``scf`` supplies the normal FCH and XCH policy. ``fch_scf`` and
-    ``xch_scf`` are optional advanced overrides for one state only.
-    """
-
-    channel: SpinChannel = SpinChannel.BETA
-    xch: bool = True
-    occupation: OccupationMethod = OccupationMethod.MAXVOL
-    mom_warmup_calls: int = 2
-    scf: SCFConfig = field(default_factory=SCFConfig)
-    fch_scf: Optional[SCFConfig] = None
-    xch_scf: Optional[SCFConfig] = None
-
-    def __post_init__(self):
-        object.__setattr__(self, "channel", SpinChannel.normalize(self.channel))
-        if not isinstance(self.xch, bool):
-            raise ValueError("xch must be a boolean")
-        object.__setattr__(
-            self, "occupation", OccupationMethod.normalize(self.occupation))
-        try:
-            warmup_calls = normalize_maxvol_warmup_calls(
-                self.mom_warmup_calls)
-        except ValueError as error:
-            raise ValueError(
-                "mom_warmup_calls must be a positive integer") from error
-        object.__setattr__(self, "mom_warmup_calls", warmup_calls)
-        for name in ("scf", "fch_scf", "xch_scf"):
-            value = getattr(self, name)
-            if value is not None and not isinstance(value, SCFConfig):
-                raise TypeError("{} must be an SCFConfig or None".format(name))
-
-    @property
-    def channel_index(self):
-        return self.channel.index
-
-    @property
-    def resolved_fch_scf(self):
-        return self.fch_scf if self.fch_scf is not None else self.scf
-
-    @property
-    def resolved_xch_scf(self):
-        return self.xch_scf if self.xch_scf is not None else self.scf
-
-    def to_dict(self):
-        return {
-            "channel": self.channel.value,
-            "xch": self.xch,
-            "occupation": self.occupation.value,
-            "mom_warmup_calls": self.mom_warmup_calls,
-            "scf": self.scf.to_dict(),
-            "fch_scf": None if self.fch_scf is None else self.fch_scf.to_dict(),
-            "xch_scf": None if self.xch_scf is None else self.xch_scf.to_dict(),
-        }
-
-    @classmethod
-    def from_dict(cls, values):
-        values = _strict_mapping(cls, values)
-        for name in ("scf", "fch_scf", "xch_scf"):
-            if name in values and values[name] is not None:
-                values[name] = SCFConfig.from_dict(values[name])
-        return cls(**values)
-
-
-UNSET = object()
-
-
-def resolve_excitation_config(
-        config=None, *, channel=UNSET, xch=UNSET, occupation=UNSET,
-        mom_warmup_calls=UNSET, scf=UNSET, fch_scf=UNSET,
-        xch_scf=UNSET):
-    """Resolve convenience keywords to one canonical excitation config.
-
-    A complete ``config`` and individual overrides are deliberately mutually
-    exclusive, so call-site precedence can never be ambiguous.
-    """
-    overrides = {
-        "channel": channel,
-        "xch": xch,
-        "occupation": occupation,
-        "mom_warmup_calls": mom_warmup_calls,
-        "scf": scf,
-        "fch_scf": fch_scf,
-        "xch_scf": xch_scf,
-    }
-    supplied = {name: value for name, value in overrides.items()
-                if value is not UNSET}
-    if config is not None:
-        if supplied:
-            raise ValueError(
-                "config cannot be combined with individual excitation settings: {}"
-                .format(", ".join(sorted(supplied))))
-        if not isinstance(config, ExcitationConfig):
-            raise TypeError("config must be an ExcitationConfig")
-        return config
-    return ExcitationConfig(**supplied)
+def snapshot_config(value, expected_type, name):
+    """Validate and copy a public template into calculator-owned state."""
+    if value is None:
+        value = expected_type()
+    if not isinstance(value, expected_type):
+        raise TypeError(f"{name} must be a {expected_type.__name__}")
+    return value.snapshot()
 
 
 __all__ = [
     "CalculationConfig", "CheckpointConfig", "Device", "ExcitationConfig",
     "LoggingConfig", "OccupationMethod", "RuntimeConfig", "SCFConfig",
-    "SpinChannel", "resolve_excitation_config",
+    "SpinChannel", "snapshot_config",
 ]

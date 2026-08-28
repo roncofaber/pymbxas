@@ -19,8 +19,8 @@ matplotlib.use("Agg")
 import numpy as np
 
 from pymbxas import (
-    CalculationConfig, CheckpointConfig, ExcitationConfig, LoggingConfig,
-    PySCFMBXAS, RuntimeConfig, SCFConfig,
+    CalculationConfig, ExcitationConfig, LoggingConfig, PySCFMBXAS,
+    RuntimeConfig, SCFConfig,
 )
 from pymbxas.io.config import format_log_fields
 from pymbxas.plotting import plot_mbxas_decomposition
@@ -127,27 +127,25 @@ def load_or_calculate(here, output_paths, recalculate, use_gpu, xc, basis,
     excitation = ExcitationConfig(
         occupation=occupation_method,
         mom_warmup_calls=mom_warmup_calls,
-        scf=scf,
     )
     runtime = RuntimeConfig(
         work_directory=output_paths["checkpoints"],
         device=device,
-        logging=LoggingConfig(
-            pymbxas_verbosity=3,
-            pymbxas_logfile=str(
-                output_paths["logs"]
-                / f"pymbxas_{GEOMETRY_TAG}_{tag}_{device}_{occupation_method}.log"),
-            pyscf_verbosity=DFT_VERBOSE,
-            pyscf_logfile=str(
-                output_paths["logs"]
-                / f"pyscf_{GEOMETRY_TAG}_{tag}_{device}_{occupation_method}.log"),
-            pyscf_console=False,
-        ),
-        checkpoint=CheckpointConfig(filename=checkpoint.name),
+    )
+    logging = LoggingConfig(
+        pymbxas_verbosity=3,
+        pymbxas_logfile=str(
+            output_paths["logs"]
+            / f"pymbxas_{GEOMETRY_TAG}_{tag}_{device}_{occupation_method}.log"),
+        pyscf_verbosity=DFT_VERBOSE,
+        pyscf_logfile=str(
+            output_paths["logs"]
+            / f"pyscf_{GEOMETRY_TAG}_{tag}_{device}_{occupation_method}.log"),
+        pyscf_console=False,
     )
     if checkpoint.exists() and not recalculate:
         print(f"Loading existing calculation: {checkpoint}")
-        obj = PySCFMBXAS.load(checkpoint, runtime=runtime)
+        obj = PySCFMBXAS.load(checkpoint)
         validate_checkpoint_geometry(
             obj, ase.io.read(here / STRUCTURE_NAME))
         expected = {i for i, symbol in enumerate(
@@ -155,18 +153,23 @@ def load_or_calculate(here, output_paths, recalculate, use_gpu, xc, basis,
         if expected - set(obj.excited_idxs):
             missing = sorted(expected - set(obj.excited_idxs))
             print(f"Resuming missing oxygen sites: {missing}")
-            obj.excite(missing, config=excitation)
+            obj.excite(
+                missing, excitation=excitation, fch_scf=scf, xch_scf=scf,
+                runtime=runtime, logging=logging)
         return obj
 
     structure = ase.io.read(here / STRUCTURE_NAME)
     obj = PySCFMBXAS(
         structure,
-        config=CalculationConfig(
+        calculation=CalculationConfig(
             charge=0, spin=0, xc=xc, basis=basis, method="UKS",
-            localization="ibo", ground_state_scf=scf),
-        runtime=runtime,
+            localization="ibo"),
+        gs_scf=scf,
+        checkpoint=checkpoint,
     )
-    obj.run("O", config=excitation)
+    obj.run(
+        "O", excitation=excitation, fch_scf=scf, xch_scf=scf,
+        runtime=runtime, logging=logging)
     return obj
 
 

@@ -17,7 +17,7 @@ import pymbxas.io.write as write_module
 from pymbxas.calculators.pyscf import PySCFMBXAS
 from pymbxas.config import (
     CalculationConfig, CheckpointConfig, ExcitationConfig, LoggingConfig,
-    RuntimeConfig,
+    RuntimeConfig, SCFConfig,
 )
 from pymbxas.io.config import (
     configure_logger, format_log_fields, log_scf_completion,
@@ -90,27 +90,29 @@ def test_scf_completion_aggregates_occupation_tracking():
 
 def test_excite_reports_success_failure_and_skip(monkeypatch):
     log, stream = _memory_logger()
-    obj = PySCFMBXAS.__new__(PySCFMBXAS)
-    obj.structure = ase.Atoms("OOO")
+    obj = PySCFMBXAS(
+        ase.Atoms("OOO"), calculation=CalculationConfig(basis="sto-3g"),
+        checkpoint=None)
     obj._ran_GS = True
-    obj.config = CalculationConfig(basis="sto-3g")
-    obj.runtime = RuntimeConfig(
-        checkpoint=CheckpointConfig(enabled=False))
     default = ExcitationConfig()
     obj._excitations = [SimpleNamespace(
-        ato_idx=2, channel=default.channel_index, config=default)]
+        ato_idx=2, channel=default.channel_index, config=default,
+        fch_scf=SCFConfig(), xch_scf=SCFConfig())]
     obj._last_excitation_outcomes = ()
     obj.gs_data = object()
     obj.df_obj = None
     obj.logger = log
 
     class FakeExcitation:
-        def __init__(self, structure, gs_data, ato_idx, config):
+        def __init__(self, structure, gs_data, ato_idx, config,
+                     fch_scf, xch_scf):
             self.ato_idx = ato_idx
             self.channel = config.channel_index
             self.config = config
+            self.fch_scf = fch_scf
+            self.xch_scf = xch_scf
 
-        def run(self, structure, gs_data, calculation, runtime, df_obj, logger):
+        def run(self, *args):
             if self.ato_idx == 1:
                 raise RuntimeError("FCH SCF did not converge after 100 cycles")
             return self
@@ -134,8 +136,7 @@ def test_excite_reports_success_failure_and_skip(monkeypatch):
 
 def test_excite_requires_ground_state():
     log, stream = _memory_logger()
-    obj = PySCFMBXAS.__new__(PySCFMBXAS)
-    obj._ran_GS = False
+    obj = PySCFMBXAS(ase.Atoms("H"), checkpoint=None)
     obj.logger = log
 
     with pytest.raises(RuntimeError, match="before the ground state"):
@@ -220,19 +221,19 @@ def test_calculation_log_paths_are_relative_to_target_directory(tmp_path):
     target = tmp_path / "calculation"
     obj = PySCFMBXAS(
         ase.Atoms("H"),
-        config=CalculationConfig(spin=1, basis="sto-3g"),
-        runtime=RuntimeConfig(
-            work_directory=target,
-            logging=LoggingConfig(
-                pymbxas_verbosity=1,
-                pymbxas_logfile="application.log",
-                pyscf_verbosity=0,
-                pyscf_logfile="pyscf.log",
-                pyscf_console=False),
-            checkpoint=CheckpointConfig(enabled=False)))
+        calculation=CalculationConfig(spin=1, basis="sto-3g"),
+        checkpoint=None)
+    obj._prepare_execution(
+        RuntimeConfig(work_directory=target),
+        LoggingConfig(
+            pymbxas_verbosity=1,
+            pymbxas_logfile="application.log",
+            pyscf_verbosity=0,
+            pyscf_logfile="pyscf.log",
+            pyscf_console=False))
 
-    assert obj.runtime.logging.pymbxas_logfile == str(target / "application.log")
-    assert obj.runtime.logging.pyscf_logfile == str(target / "pyscf.log")
+    assert obj.logging.pymbxas_logfile == str(target / "application.log")
+    assert obj.logging.pyscf_logfile == str(target / "pyscf.log")
     assert (target / "application.log").exists()
     configure_logger(3)
 

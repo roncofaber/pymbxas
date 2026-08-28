@@ -5,7 +5,7 @@ Entries describe what changed for someone using the package. Conventions in `AGE
 ## [Unreleased]
 
 ### Added
-- Immutable SCF and excitation configurations support validated reusable settings.
+- Validated configuration templates support transactional `.set()` and independent `.copy()` variants.
 - Spectrum decompositions can plot cumulative and shake-up/down-resolved panels.
 - The 6fda example accepts any positive f order and plots every contribution.
 - `Spectras` can aggregate and plot order-resolved decompositions across sites
@@ -45,6 +45,10 @@ Entries describe what changed for someone using the package. Conventions in `AGE
 - The 6fda example can select PBE or B3LYP without sharing checkpoints.
 
 ### Changed
+- Calculation, execution, logging, checkpoint, excitation, and per-state SCF settings are now separate.
+- `run_gs()`, `excite()`, and `run()` now expose distinct calculation lifecycle stages.
+- Calculation checkpoints now persist the exact GS, FCH, and XCH solver configurations.
+- Checkpoint paths are accepted directly and `None` disables automatic checkpointing.
 - GitHub is now the canonical source repository and development remote.
 - Direct maxvol is now the default constrained-SCF occupation controller;
   MOM and mixed MOM/maxvol tracking remain explicit diagnostic choices.
