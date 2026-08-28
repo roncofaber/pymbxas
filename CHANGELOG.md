@@ -45,6 +45,7 @@ Entries describe what changed for someone using the package. Conventions in `AGE
 - The 6fda example can select PBE or B3LYP without sharing checkpoints.
 
 ### Changed
+- GitHub is now the canonical source repository and development remote.
 - Direct maxvol is now the default constrained-SCF occupation controller;
   MOM and mixed MOM/maxvol tracking remain explicit diagnostic choices.
 - Calculations now use `PySCFMBXAS`, configuration objects, and explicit `run()` execution.

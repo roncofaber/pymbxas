@@ -2,7 +2,7 @@
 
 Python implementation of Many-Body X-ray Absorption Spectroscopy (MBXAS) for molecules, built on PySCF and ASE. Computes core-level XAS via a ΔSCF core-hole workflow plus the one-body determinant approximation to the many-body transition amplitude.
 
-- **Package** `pymbxas` · **Main branch** `main` · **Working branch** `dev` · **Remote** GitLab (`roncofaber/pymbxas`)
+- **Package** `pymbxas` · **Main branch** `main` · **Working branch** `dev` · **Remote** GitHub (`roncofaber/pymbxas`)
 - **Stack** PySCF 2.x, ASE 3.23+, NumPy 2.x, h5py, psutil, scikit-learn
 - **Optional** gpu4pyscf (GPU), MOKIT (fchk output), gpflow + TensorFlow (`explorer/`), sea_urchin (structure alignment)
 - **Method** GS → FCH → XCH ΔSCF with selectable MOM/maxvol state tracking, then determinant-based amplitudes. See `dev/method.md`.

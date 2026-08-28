@@ -1,7 +1,3 @@
-<div align="center">
-  <img src="https://gitlab.com/uploads/-/system/project/avatar/47099716/pymbxas2_1_.png" height="120px"/>
-</div>
-
 # PyMBXAS
 
 [![PyPI version](https://badge.fury.io/py/pymbxas.svg)](https://badge.fury.io/py/pymbxas)
@@ -42,7 +38,7 @@ pip install "pymbxas[ml]"    # experimental explorer dependencies
 To install the current development branch:
 
 ```bash
-pip install "git+https://gitlab.com/roncofaber/pymbxas.git@dev"
+pip install "git+https://github.com/roncofaber/pymbxas.git@dev"
 ```
 
 ## Basic calculation
