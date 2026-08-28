@@ -10,7 +10,26 @@ import numpy as np
 
 #%%
 
-def occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel, core_orb_idx):
+def core_hole_index(mb_overlap_channel, fch_mo_occ_channel, core_orb_idx):
+    """Locate the FCH core hole by overlap with the selected GS core MO.
+
+    MOM occupations need not be Aufbau ordered, so the core hole is not
+    necessarily the first zero in ``fch_mo_occ_channel``.  Rows of
+    ``mb_overlap_channel`` are FCH MOs and columns are GS MOs.
+    """
+    unoccupied = np.flatnonzero(np.asarray(fch_mo_occ_channel) == 0)
+    if unoccupied.size == 0:
+        raise ValueError("The FCH excited channel has no unoccupied orbitals")
+    if not 0 <= int(core_orb_idx) < mb_overlap_channel.shape[1]:
+        raise ValueError(
+            f"Ground-state core orbital index {core_orb_idx} is outside the "
+            f"overlap matrix with {mb_overlap_channel.shape[1]} columns")
+    overlaps = np.abs(np.asarray(mb_overlap_channel)[unoccupied, int(core_orb_idx)])
+    return int(unoccupied[np.argmax(overlaps)])
+
+
+def occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel, core_orb_idx,
+                      core_hole_idx=None):
     """Occupied/unoccupied valence orbital indices for one spin channel.
 
     gs_mo_occ_channel, fch_mo_occ_channel: (norb,) occupation numbers for
@@ -18,8 +37,12 @@ def occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel, core_orb_idx):
     core_orb_idx: the excited core orbital's GS MO index, excluded from
         the GS occupied set.
 
-    Returns (occ_idxs_gs, occ_idxs_fch, uno_idxs_fch). uno_idxs_fch drops
-    the core-hole index (position 0 of the FCH unoccupied set).
+    ``core_hole_idx`` is the FCH MO index identified by orbital overlap.  It
+    should be supplied for non-Aufbau states; the legacy lowest-index fallback
+    is retained for callers that only have occupations.
+
+    Returns (occ_idxs_gs, occ_idxs_fch, uno_idxs_fch). ``uno_idxs_fch`` drops
+    the identified core-hole MO while preserving every ordinary virtual.
     """
     gs_occ_idxs = np.where(gs_mo_occ_channel == 1)[0]
     if core_orb_idx not in gs_occ_idxs:
@@ -29,14 +52,24 @@ def occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel, core_orb_idx):
         )
     occ_idxs_gs  = np.setdiff1d(gs_occ_idxs, [core_orb_idx])
     occ_idxs_fch = np.where(fch_mo_occ_channel == 1)[0]
-    uno_idxs_fch = np.where(fch_mo_occ_channel == 0)[0][1:]
+    unoccupied = np.where(fch_mo_occ_channel == 0)[0]
+    if unoccupied.size == 0:
+        raise ValueError("The FCH excited channel has no unoccupied orbitals")
+    if core_hole_idx is None:
+        core_hole_idx = int(unoccupied[0])
+    if core_hole_idx not in unoccupied:
+        raise ValueError(
+            f"FCH core-hole index {core_hole_idx} is not unoccupied; "
+            f"unoccupied indices: {unoccupied}")
+    uno_idxs_fch = unoccupied[unoccupied != core_hole_idx]
     return occ_idxs_gs, occ_idxs_fch, uno_idxs_fch
 
 
 def spectator_occ_unocc_indices(gs_mo_occ_channel, fch_mo_occ_channel):
     """Occupied/unoccupied valence orbital indices for the spectator
-    (non-excited) spin channel's own shake-up (mbxas.shakeup), the
-    cross-spin contribution of mbxas-qe's spin_convolve_spectrum.
+    (non-excited) spin channel's own overlap-satellite kernel. It supplies
+    the spectator factor in PyMBXAS's cross-spin convolution; see
+    dev/shakeup.md for how that differs from mbxas-qe's full construction.
 
     Unlike occ_unocc_indices, there is no core orbital to remove and no
     core-hole index to drop from the unoccupied set: this channel keeps
@@ -71,11 +104,9 @@ def build_A_K(mb_overlap_channel, occ_idxs_fch, occ_idxs_gs, uno_idxs_fch):
 
     Returns (AMat, ADet, KMat, APrimeMat): AMat is the square valence overlap
     matrix, ADet its determinant, KMat = A'Mat @ inv(AMat) the matrix used
-    both for the n=1 amplitude (Eq. 22, PRB 107,035146) and, at higher
-    order, for shake-up minors (see mbxas.shakeup). APrimeMat is returned
-    alongside KMat because mbxas.shakeup's maxvol-based configuration
-    search needs the raw unoccupied-valence overlap rows, not just their
-    product with inv(AMat).
+    both for the n=1 amplitude (Eq. 22, PRB 107,035146) and for the exact
+    higher-order determinant expansions (see mbxas.shakeup). APrimeMat is
+    also returned for determinant-overlap spectra.
     """
     AMat = mb_overlap_channel[np.ix_(occ_idxs_fch, occ_idxs_gs)]
     ADet = np.linalg.det(AMat)
@@ -116,12 +147,15 @@ def run_MBXAS_pyscf(mol, gs_calc, fch_calc, gs_orb_idx, channel=1, xch_calc=None
         for ch in range(2)
     ])  # shape: (2, 3, norb, norb)
 
-    # Index of the excited orbital in FCH calculation
-    exc_orb_idx = np.where(fch_calc.mo_occ[channel] == 0)[0][0]
+    # Locate the core hole by its overlap with the selected GS core orbital;
+    # MOM states are not guaranteed to have Aufbau-ordered occupations.
+    exc_orb_idx = core_hole_index(
+        mb_overlap[channel], fch_calc.mo_occ[channel], gs_orb_idx)
 
     # Occupied and unoccupied orbital indices for GS and FCH (excited channel)
     occ_idxs_gs, occ_idxs_fch, uno_idxs_fch = occ_unocc_indices(
-        gs_calc.mo_occ[channel], fch_calc.mo_occ[channel], gs_orb_idx)
+        gs_calc.mo_occ[channel], fch_calc.mo_occ[channel], gs_orb_idx,
+        core_hole_idx=exc_orb_idx)
 
     # Extract A/K matrices for the excited channel
     AMat, ADet, KMat, _ = build_A_K(mb_overlap[channel], occ_idxs_fch, occ_idxs_gs, uno_idxs_fch)

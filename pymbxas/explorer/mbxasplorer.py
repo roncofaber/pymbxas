@@ -7,8 +7,10 @@ Created on Fri Feb  2 15:32:48 2024
 """
 
 # numpy is my rock and I am ready to roll
-import numpy as np
 import copy
+import logging
+
+import numpy as np
 
 # pymbxas stuff
 from pymbxas import Spectras
@@ -20,6 +22,8 @@ from pymbxas.drivers.acquisitor import pyscf_acquire
 
 # let's add more packages
 from sklearn.model_selection import train_test_split
+
+logger = logging.getLogger(__name__)
 
 #%%
 
@@ -285,7 +289,7 @@ class MBXASplorer(object):
                    broaden):
         
         if peak_label in self._labels: # ignore noise
-            print(f"Node {peak_label} already exists.")
+            logger.warning("Node %s already exists; skipping", peak_label)
             return
         
         if not isinstance(broaden, dict): raise TypeError("broaden must be dict")

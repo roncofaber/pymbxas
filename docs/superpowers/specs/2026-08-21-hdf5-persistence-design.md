@@ -191,7 +191,7 @@ Core:
 | `explorer/mbxasplorer.py` | Last remaining `dill.dump(self)` at line 404 |
 | `utils/auxiliary.py` | `change_key` removed; it exists only to serve the two shims |
 
-Defaults, packaging and docs: `setup.cfg` (`dill` out, `h5py` declared), `cli/pyscf.py` output default, `drivers/acquisitor.py`, `examples/example_H2O_molecule.py`, `__init__.py` docstring and version, `README.md`, `dev/architecture.md` persistence section, `CLAUDE.md` stack line and persistence bullet, `CHANGELOG.md`, `CITATION.cff`.
+Defaults, packaging and docs: `setup.cfg` (`dill` out, `h5py` declared), `cli/pyscf.py` output default, `drivers/acquisitor.py`, `examples/example_H2O_molecule.py`, `__init__.py` docstring and version, `README.md`, `dev/architecture.md` persistence section, `AGENTS.md` stack line and persistence bullet, `CHANGELOG.md`, `CITATION.cff`.
 
 ## Testing
 

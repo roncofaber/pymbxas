@@ -13,6 +13,35 @@ import numpy as np
 
 #%%
 
+def match_orbitals_by_overlap(overlap):
+    """Return the maximum-weight one-to-one GS/FCH orbital assignment.
+
+    ``overlap`` follows the MBXAS convention ``(fch_orbital, gs_orbital)``.
+    The assignment maximizes the total squared overlap, avoiding the duplicate
+    FCH partners produced by independent per-orbital ``argmax`` matching.
+
+    Returns
+    -------
+    gs_indices, fch_indices, weights
+        One-dimensional arrays sorted by GS orbital index. ``weights`` are
+        squared overlap magnitudes and lie between zero and one for normalized
+        orbitals.
+    """
+    from scipy.optimize import linear_sum_assignment
+
+    overlap = np.asarray(overlap)
+    if overlap.ndim != 2:
+        raise ValueError("overlap must be a two-dimensional matrix")
+    weights = np.abs(overlap) ** 2
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("overlap contains non-finite values")
+    fch_indices, gs_indices = linear_sum_assignment(-weights)
+    order = np.argsort(gs_indices)
+    gs_indices = gs_indices[order]
+    fch_indices = fch_indices[order]
+    return gs_indices, fch_indices, weights[fch_indices, gs_indices]
+
+
 def find_1s_orbitals_pyscf(molecule, coefficients, energies, occupations,
                            ato_idxs, check_deg=True):
 

@@ -1,5 +1,11 @@
 # Cross-spin shake-up and shake-down
 
+> **Historical design record.** The design below introduced a public
+> `shakedown_only` flag. The current API always returns the physical sum and
+> reports shake-up/shake-down components through `get_shakeup_summary()`.
+> summed stick energy, which is not `mbxas-qe`'s any-negative-constituent
+> selection. See `dev/shakeup.md` and the 2026-08-25 scientific review.
+
 ## Problem
 
 The shake-up satellite correction added earlier (`get_mbxas_spectra(shakeup_order=...)`)
@@ -108,7 +114,7 @@ where `delta_e < 0`. Adds a boolean mask/filter, not a new computation.
   quantity and, where one exists, the source equation/reference (matching
   the style already used in `build_A_K`'s docstring, e.g. "Eq. 22, PRB
   107,035146"). A handful of targeted comments, not a rewrite of existing
-  ones -- `CLAUDE.md`'s no-comments default is deliberately overridden
+  ones -- `AGENTS.md`'s no-comments default is deliberately overridden
   here, for this directory only, because the *why* (which formula, from
   which paper) is exactly the non-obvious information a reader of physics
   code needs.

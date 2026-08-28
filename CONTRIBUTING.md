@@ -10,13 +10,22 @@ conda run -n pymbxas python -c "import pymbxas; print(pymbxas.__version__)"
 
 ## Testing
 
-There is one end-to-end test, `tests/test_h2o_kedge.py`. It runs the full H2O oxygen K-edge workflow (roughly 15 seconds) and verifies the method invariants: SCF convergence, core-hole retention, determinant sanity, XCH alignment, and spectral shape.
+The test suite combines focused unit tests with a full H2O oxygen K-edge
+workflow. It covers SCF convergence and recovery, MOM/maxvol occupation
+tracking, core-hole retention, XCH alignment, determinant algebra, HDF5
+restart behavior, shake-up/down assembly, logging, and plotting.
 
 ```bash
 conda run -n pymbxas pytest tests/ -q
 ```
 
-**Before committing any changes to `mbxas/`, `calculators/`, `build/`, or `utils/orbitals.py`, this test must pass.** It is the only thing preventing silently wrong spectra from reaching users. Do not grow the test suite - if you need a new physics invariant, add an assertion to the existing test.
+Before committing changes to `mbxas/`, `calculators/`, `build/`, or
+`utils/orbitals.py`, run the complete suite. New behavior and physics
+invariants should receive focused regression tests.
+
+GPU-specific tests skip when CUDA is unavailable. On a GPU host, also run them
+explicitly with `pytest -q tests/test_maxvol_occ.py -k gpu` so a skip in the
+general suite is not mistaken for GPU coverage.
 
 ## Changelog
 
@@ -30,10 +39,14 @@ Each entry is one line, under 15 words, and states what changed in observable be
 
 ## Method invariants
 
-Breaking one silently produces a wrong spectrum, not an error. The method invariants are documented in `CLAUDE.md` and derived in `dev/method.md`. The key ones:
+Breaking one silently produces a wrong spectrum, not an error. The method
+invariants are summarized in `AGENTS.md` and derived in `dev/method.md`. The
+experimental satellite path and its current limitations are documented in
+`dev/shakeup.md`. The key established invariants are:
 - Only unrestricted calculations (UKS/UHF).
 - `mo_occ` is 1.0/0.0, not 2.0/0.0; comparisons against `== 1` are load-bearing.
-- The core hole is the lowest-energy unoccupied MO: `np.where(mo_occ[channel] == 0)[0][0]`, never hardcoded as index 0.
+- Identify the FCH core hole by maximum overlap with the selected GS 1s
+  orbital; non-Aufbau occupations make the first unoccupied index unreliable.
 - Ground-state orbitals indexed by MO number, not position; use `np.setdiff1d`, not `np.delete`.
 - Units Hartree internally, eV only at presentation.
 - Amplitude is shape `(3, n_transitions)` and is squared before broadening.

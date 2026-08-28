@@ -93,21 +93,21 @@ def zmatlike(atoms, ref_indices=[0,1,2]):
         ref_indices: A list or tuple of three indices to be used as reference atoms.
     
     Returns:
-        A 1D numpy array containing the distances. Returns None if the structure
-        is unsuitable for this representation.
+        A 1D numpy array containing the distances.
+
+    Raises:
+        ValueError: If the structure or reference indices are invalid.
     """
     num_atoms = len(atoms)
     if num_atoms < 4:
-        print("Error: At least 4 atoms are required for this representation.")
-        return None
+        raise ValueError("At least 4 atoms are required for this representation")
 
     if len(ref_indices) != 3:
-        print("Error: Exactly three reference indices must be provided.")
-        return None
+        raise ValueError("Exactly three reference indices must be provided")
 
-    if any(idx >= num_atoms for idx in ref_indices):
-        print("Error: Reference indices must be within the range of the number of atoms.")
-        return None
+    if any(idx < 0 or idx >= num_atoms for idx in ref_indices):
+        raise ValueError(
+            "Reference indices must be within the range of the number of atoms")
 
     positions = atoms.get_positions()
     
@@ -128,4 +128,3 @@ def zmatlike(atoms, ref_indices=[0,1,2]):
     feature_vector[3:] = distances.flatten()
 
     return feature_vector
-

@@ -13,10 +13,10 @@
 ## Global Constraints
 
 - Every new numerical routine operates on whole arrays (broadcasting, outer sum/product, batched `det`) — never a Python-level loop over individual valence/conduction combinations. Looping over the small number of `(i, j)` *order* pairs (at most `(MAX_IMPLEMENTED_ORDER+1)^2`) is fine; that is not what this constraint restricts.
-- In `pymbxas/mbxas/mbxas.py` and `pymbxas/mbxas/shakeup.py` only, add a short comment at each new/changed function's core formula naming the physical quantity and, where one exists, the source equation ("Eq. 22, PRB 107,035146"-style). `CLAUDE.md`'s no-comments default is deliberately overridden for these two files, because the *why* — which formula, from which paper — is the non-obvious information a reader of physics code needs. Don't add comments elsewhere in the codebase for this feature.
+- In `pymbxas/mbxas/mbxas.py` and `pymbxas/mbxas/shakeup.py` only, add a short comment at each new/changed function's core formula naming the physical quantity and, where one exists, the source equation ("Eq. 22, PRB 107,035146"-style). `AGENTS.md`'s no-comments default is deliberately overridden for these two files, because the *why* — which formula, from which paper — is the non-obvious information a reader of physics code needs. Don't add comments elsewhere in the codebase for this feature.
 - `spectator_order=None` and `max_total_order=None` (the defaults) must leave every existing call byte-identical to pre-feature output. Where a task's design achieves this by routing through a shared helper, that helper must short-circuit to literally the same call as before — not merely produce numerically-equal floats through a different code path.
 - No backward-compatibility shims for old saved `.h5` files; none of the new fields are persisted (they're derived on demand from the already-persisted `mb_overlap`/`mo_occ`/`mo_energy`/`core_orb_idx`).
-- `tests/test_h2o_kedge.py` is the project's one physics test file — add assertions to the existing `test_h2o_oxygen_kedge` function; do not create a new test file (per `CLAUDE.md`).
+- `tests/test_h2o_kedge.py` is the project's one physics test file — add assertions to the existing `test_h2o_oxygen_kedge` function; do not create a new test file (per `AGENTS.md`).
 - Run `conda run -n pymbxas pytest tests/ -q` at the end of every task; all tests must pass before moving on.
 - Run `conda run -n pymbxas python -c "import pymbxas"` after any import-order change to catch circular imports early (this codebase uses many function-local imports specifically to avoid them).
 - After all coding tasks are done, Task 9 is a dedicated scientific-soundness review of the whole `mbxas/` implementation (not just this feature), separate from and in addition to the generic final whole-branch code review the subagent-driven-development process runs automatically afterward. Findings and improvement ideas from Task 9 are reported to the user, not auto-applied beyond what Task 9 itself fixes.
@@ -1156,7 +1156,7 @@ This file lives outside the `pymbxas` git repository (`/home/roncofaber/WORK/MBX
 **Files:**
 - Modify: `CHANGELOG.md`
 - Modify: `dev/method.md` (paragraphs starting "Spectator-spin determinant is omitted" and "One-body truncation, with an opt-in order-2 correction")
-- Modify: `CLAUDE.md` (the `get_mbxas_spectra` gotcha bullet)
+- Modify: `AGENTS.md` (the `get_mbxas_spectra` gotcha bullet)
 
 **Interfaces:** none (documentation only).
 
@@ -1188,7 +1188,7 @@ with:
 
 > "Cross-spin convolution (the *other*, non-excited channel's own shake-up, via `spin_convolve_spectrum` in `mbxas-qe`'s `spec.f90`) is implemented as `spectator_order`/`max_total_order` on `get_mbxas_spectra`/`get_shakeup_spectrum`/`get_shakeup_summary`; `spectator_order=None` (the default) reproduces the pre-cross-spin behavior exactly. `shakedown_only` isolates combinations with negative electron-hole energy ("shake-down", `mbxas-qe`'s `kpoint_spectral_details.f90` naming); `get_shakeup_summary` always reports the corresponding `shakedown_fraction` and warns above `tol`."
 
-- [ ] **Step 3: Update `CLAUDE.md`**
+- [ ] **Step 3: Update `AGENTS.md`**
 
 In the gotcha bullet starting "`get_mbxas_spectra` exists on two classes plus a free function", update:
 
@@ -1201,7 +1201,7 @@ to:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add CHANGELOG.md dev/method.md CLAUDE.md
+git add CHANGELOG.md dev/method.md AGENTS.md
 git commit -m "Document cross-spin shake-up and shake-down"
 ```
 
@@ -1219,7 +1219,7 @@ git commit -m "Document cross-spin shake-up and shake-down"
 Read, in full: `pymbxas/mbxas/mbxas.py`, `pymbxas/mbxas/shakeup.py`, `pymbxas/mbxas/broaden.py`, and the physics-relevant parts of `pymbxas/spectra.py` (`get_mbxas_spectra`, `_shakeup_sticks`, `_shakeup_sticks_by_order`, `_spectator_shakeup_sticks`, `_combined_shakeup_sticks`, `get_shakeup_spectrum`, `get_shakeup_summary`, `amp2int`) and `pymbxas/calculators/pyscf.py`'s `get_mbxas_spectra`. Read `dev/method.md` in full.
 
 Check, and record a finding for any that fails:
-1. Every documented invariant in `dev/method.md`'s "Method invariants" section and `CLAUDE.md`'s "Method invariants" section still holds (spin channel convention, core-hole index location, GS orbital indexing by MO number, Hartree-internally/eV-at-boundary units, XCH alignment, transition-dipole origin independence, spectator channel omitted from the *amplitude* specifically — the new shake-up cross term is a separate, downstream correction and must not be confused with this).
+1. Every documented invariant in `dev/method.md`'s "Method invariants" section and `AGENTS.md`'s "Method invariants" section still holds (spin channel convention, core-hole index location, GS orbital indexing by MO number, Hartree-internally/eV-at-boundary units, XCH alignment, transition-dipole origin independence, spectator channel omitted from the *amplitude* specifically — the new shake-up cross term is a separate, downstream correction and must not be confused with this).
 2. `spectator_occ_unocc_indices`'s no-removal, no-drop indexing is actually correct for a spin channel with no core hole (cross-check against `occ_unocc_indices`'s reasoning).
 3. `combine_cross_channel_sticks`'s outer-sum/outer-product identity is the correct discrete form of convolving two independent probability distributions — verify by hand on a small numeric example that total probability mass is conserved appropriately (i.e. that summing weights over all `(i,j)` pairs up to a given cap, plus the implicit trivial term, gives the expected total).
 4. The two-level `shakedown_only` design (per-channel filter in `mbxas.shakeup.shakeup_sticks`, whole-combination filter in the `Spectra` API) is self-consistent and each level's docstring correctly describes which one it is.

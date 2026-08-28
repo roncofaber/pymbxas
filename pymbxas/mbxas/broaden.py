@@ -48,22 +48,32 @@ def broadened_spectrum(egrid, energies, intensities, sigma, nsigma=6):
     half_window = max(1, int(np.ceil(nsigma * sigma / abs(de))))
     offsets = np.arange(-half_window, half_window + 1)  # (W,)
 
-    i0 = np.round((energies - egrid[0]) / de).astype(np.int64)
-    idx = i0[:, None] + offsets[None, :]  # (M, W)
-    valid = (idx >= 0) & (idx < npoints)
-    idx = np.clip(idx, 0, npoints - 1)
+    # Bound the temporary (sticks, Gaussian-window) arrays. MB3 spin
+    # combinations can contain hundreds of thousands of relevant sticks even
+    # in a small active space; constructing their windows all at once can use
+    # several GB although the final spectrum is only ``npoints`` long.
+    max_window_elements = 2_000_000
+    chunk_size = max(1, max_window_elements // len(offsets))
+    for start in range(0, M, chunk_size):
+        stop = min(start + chunk_size, M)
+        energy_chunk = energies[start:stop]
+        i0 = np.round((energy_chunk - egrid[0]) / de).astype(np.int64)
+        idx = i0[:, None] + offsets[None, :]
+        valid = (idx >= 0) & (idx < npoints)
+        idx = np.clip(idx, 0, npoints - 1)
+        gauss = gaussian_broadening(
+            egrid[idx] - energy_chunk[:, None], sigma)
+        gauss = np.where(valid, gauss, 0.0)
+        idx_flat = idx.ravel()
 
-    gauss = gaussian_broadening(egrid[idx] - energies[:, None], sigma)  # (M, W)
-    gauss = np.where(valid, gauss, 0.0)
-    idx_flat = idx.ravel()
-
-    if is_1d:
-        contrib = (intensities[:, None] * gauss).ravel()
-        return np.bincount(idx_flat, weights=contrib, minlength=npoints)
-
-    for a in range(intensities.shape[0]):
-        contrib = (intensities[a][:, None] * gauss).ravel()
-        out[a] = np.bincount(idx_flat, weights=contrib, minlength=npoints)
+        if is_1d:
+            contrib = (intensities[start:stop, None] * gauss).ravel()
+            out += np.bincount(idx_flat, weights=contrib, minlength=npoints)
+        else:
+            for a in range(intensities.shape[0]):
+                contrib = (intensities[a, start:stop, None] * gauss).ravel()
+                out[a] += np.bincount(
+                    idx_flat, weights=contrib, minlength=npoints)
     return out
 
 def get_mbxas_spectra(energies, intensities, sigma=0.5, npoints=3001, tol=0.01, erange=None):

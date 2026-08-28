@@ -132,7 +132,9 @@ class Spectras():
     
     # get all spectras with a specific label
     def get_mbxas_spectras(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
-                          erange=None, label=None, el_label=None):
+                          erange=None, label=None, el_label=None, f_order=1,
+                          spectator_order="auto", max_total_order=None,
+                          max_configurations=2_000_000):
         if label is None:
             spectras = self.spectras
         else:
@@ -146,7 +148,11 @@ class Spectras():
         for spectra in spectras:
             Et, I = spectra.get_mbxas_spectra(axis=axis, sigma=sigma,
                                              npoints=npoints, tol=tol,
-                                             erange=erange, el_label=el_label)
+                                             erange=erange, el_label=el_label,
+                                             f_order=f_order,
+                                             spectator_order=spectator_order,
+                                             max_total_order=max_total_order,
+                                             max_configurations=max_configurations)
 
             E = Et
             I_list.append(I)
@@ -155,7 +161,10 @@ class Spectras():
    
     # get the average spectra
     def get_mbxas_spectra(self, axis=None, sigma=0.5, npoints=3001, tol=0.01,
-                          erange=None, label=None, el_label=None, average=True):
+                          erange=None, label=None, el_label=None, average=True,
+                          f_order=1, spectator_order="auto",
+                          max_total_order=None,
+                          max_configurations=2_000_000):
         
         if erange is None:
             erange=self._erange
@@ -163,7 +172,10 @@ class Spectras():
         E, I_list = self.get_mbxas_spectras(axis=axis, sigma=sigma,
                                             npoints=npoints, tol=tol,
                                             erange=erange, label=label,
-                                            el_label=el_label)
+                                            el_label=el_label, f_order=f_order,
+                                            spectator_order=spectator_order,
+                                            max_total_order=max_total_order,
+                                            max_configurations=max_configurations)
         
         if average:
             I_list = np.mean(I_list, axis=0)
@@ -171,6 +183,156 @@ class Spectras():
             I_list = np.sum(I_list, axis=0)
         
         return E, I_list
+
+    def get_mbxas_decomposition(
+            self, f_order=2, sigma=0.5, npoints=3001, erange=None, tol=0.01,
+            label=None, average=True, spectator_order="auto",
+            max_total_order=None, max_configurations=2_000_000):
+        """Return an aggregate many-body decomposition for this collection.
+
+        The returned mapping has the same numerical fields as
+        :meth:`Spectra.get_mbxas_decomposition`. Arrays and overlap masses are
+        averaged by default, matching :meth:`get_mbxas_spectra`; pass
+        ``average=False`` to sum independent absorbing sites. Site-resolved
+        overlap reports remain available under ``overlap["per_site"]``.
+        """
+        spectras = (self.spectras if label is None
+                    else self.__get_atomic_label(label))
+        if not spectras:
+            raise ValueError("No spectra match the requested collection")
+        if erange is None:
+            erange = self._erange
+
+        site_data = [
+            spectra.get_mbxas_decomposition(
+                f_order=f_order, sigma=sigma, npoints=npoints, erange=erange,
+                tol=tol, spectator_order=spectator_order,
+                max_total_order=max_total_order,
+                max_configurations=max_configurations)
+            for spectra in spectras
+        ]
+        energy = np.asarray(site_data[0]["energy"])
+        if any(not np.array_equal(data["energy"], energy)
+               for data in site_data[1:]):
+            raise ValueError("Site decompositions do not share an energy grid")
+
+        scale = 1.0 / len(site_data) if average else 1.0
+
+        def combine_arrays(values):
+            return scale * np.sum(values, axis=0)
+
+        orders = sorted(site_data[0]["contributions"])
+        contributions = {
+            order: combine_arrays([
+                data["contributions"][order] for data in site_data])
+            for order in orders
+        }
+        cumulative = {
+            order: combine_arrays([
+                data["cumulative"][order] for data in site_data])
+            for order in orders
+        }
+        resolved_orders = sorted(site_data[0]["decomposition"])
+        decomposition = {
+            order: {
+                component: combine_arrays([
+                    data["decomposition"][order][component]
+                    for data in site_data])
+                for component in ("shakeup", "shakedown")
+            }
+            for order in resolved_orders
+        }
+        total = combine_arrays([data["total"] for data in site_data])
+        integrated = {
+            "contributions": {
+                order: np.trapezoid(value, energy)
+                for order, value in contributions.items()},
+            "cumulative": {
+                order: np.trapezoid(value, energy)
+                for order, value in cumulative.items()},
+            "decomposition": {
+                order: {
+                    component: np.trapezoid(value, energy)
+                    for component, value in parts.items()}
+                for order, parts in decomposition.items()},
+            "total": np.trapezoid(total, energy),
+        }
+
+        probability_starts = [data["probability"][0][0]
+                              for data in site_data]
+        probability_stops = [data["probability"][0][-1]
+                             for data in site_data]
+        probability_energy = np.linspace(
+            min(probability_starts), max(probability_stops), npoints)
+        probability = combine_arrays([
+            np.interp(
+                probability_energy, data["probability"][0],
+                data["probability"][1], left=0.0, right=0.0)
+            for data in site_data
+        ])
+        probability_orders = site_data[0]["probability"][2]
+        if any(data["probability"][2] != probability_orders
+               for data in site_data[1:]):
+            probability_orders = None
+
+        site_overlap = tuple(data["overlap"] for data in site_data)
+        overlap_orders = sorted(set().union(*(
+            report["by_total_order"] for report in site_overlap)))
+        by_total_order = {
+            order: scale * sum(
+                report["by_total_order"].get(order, 0.0)
+                for report in site_overlap)
+            for order in overlap_orders
+        }
+        captured = scale * sum(report["captured"] for report in site_overlap)
+        available = scale * sum(report["available"] for report in site_overlap)
+        overlap = {
+            "by_total_order": by_total_order,
+            "captured": captured,
+            "available": available,
+            "fraction": captured / available if available > 0 else 0.0,
+            "per_site": site_overlap,
+        }
+        captured_sum = sum(report["captured"] for report in site_overlap)
+        shakedown_fraction = (
+            sum(data["shakedown_fraction"] * data["overlap"]["captured"]
+                for data in site_data) / captured_sum
+            if captured_sum > 0 else 0.0)
+
+        return {
+            "energy": energy,
+            "contributions": contributions,
+            "decomposition": decomposition,
+            "cumulative": cumulative,
+            "total": total,
+            "integrated": integrated,
+            "probability": (
+                probability_energy, probability, probability_orders),
+            "overlap": overlap,
+            "shakedown_fraction": shakedown_fraction,
+            "site_count": len(site_data),
+            "aggregation": "mean" if average else "sum",
+        }
+
+    def plot_mbxas_decomposition(
+            self, f_order=2, sigma=0.5, npoints=3001, erange=None, tol=0.01,
+            label=None, average=True, spectator_order="auto",
+            max_total_order=None, max_configurations=2_000_000,
+            show_probability=True, show_resolved=False,
+            show_cumulative=False, figsize=None):
+        """Calculate and plot an aggregate collection decomposition."""
+        from pymbxas.plotting import plot_mbxas_decomposition
+
+        decomposition = self.get_mbxas_decomposition(
+            f_order=f_order, sigma=sigma, npoints=npoints, erange=erange,
+            tol=tol, label=label, average=average,
+            spectator_order=spectator_order,
+            max_total_order=max_total_order,
+            max_configurations=max_configurations)
+        return plot_mbxas_decomposition(
+            decomposition, show_probability=show_probability,
+            show_resolved=show_resolved,
+            show_cumulative=show_cumulative, figsize=figsize)
     
     def align_labels_to_mean_structures(self, alignment):
         

@@ -10,223 +10,221 @@ Created on Tue Aug  1 18:13:29 2023
 import os
 import time
 import logging
+from dataclasses import dataclass, replace
 
 # good ol' numpy
 import numpy as np
 
 # self module utilities
 import pymbxas
+import pyscf
 from pymbxas.calculators.excitation import Excitation
+from pymbxas.config import (
+    CalculationConfig, CheckpointConfig, RuntimeConfig, UNSET,
+    resolve_excitation_config,
+)
 import pymbxas.utils.check_keywords as check
 from pymbxas.utils.auxiliary import as_list
 from pymbxas.utils.indexing import atoms_to_indexes
 from pymbxas.io.data import pyscf_data
-from pymbxas.io.config import configure_logger
+from pymbxas.io.config import (
+    configure_logger, format_log_fields, log_scf_completion,
+    with_log_context,
+)
 from pymbxas.io import h5
 from pymbxas.build.structure import ase_to_mole
 from pymbxas.build.input_pyscf import make_pyscf_calculator
 from pymbxas.utils.orbitals import find_1s_orbitals_pyscf
 from pymbxas.utils.boys import do_localization_pyscf
-from pymbxas.mbxas.broaden import get_mbxas_spectra
+# from pymbxas.mbxas.broaden import get_mbxas_spectra
 from pymbxas.io.cleanup import remove_tmp_files
 from pymbxas.io.write import write_data_to_fchk
-from pymbxas import Spectra, Spectras
-
-# ase
-from ase import units
-Ha = units.Ha
+from pymbxas.spectra import Spectra
+from pymbxas.spectras import Spectras
 
 #%%
 
-class PySCF_mbxas():
-    
-    def __init__(self,
-                 structure    = None,
-                 charge       = 0,
-                 spin         = 0,
-                 xc           = "b3lyp",
-                 basis        = "def2-svpd",
-                 pbc          = None, # infer from structure, or override with explicit bool
-                 solvent      = None,  # specify solvent epsilon
-                 calc_type    = "UKS", # UKS or UHF
-                 do_xch       = True,  # do XCH to align energy
-                 loc_type     = "ibo", # localization routine
 
-                 target_dir   = None, # run the calculation in a target dir
+@dataclass(frozen=True)
+class ExcitationOutcome:
+    """Result of one requested atom excitation."""
 
-                 xas_verbose  = 3,    # verbose level of pymbxas
-                 xas_logfile  = None, # file for mbxas log
-                 dft_verbose  = 3,    # verbose level of pyscf
-                 dft_logfile  = None, # file for pyscf log
-                 dft_output   = True, # print pyscf output or not
+    atom_index: int
+    symbol: str
+    status: str
+    message: str = ""
 
-                 print_fchk   = False, # print FCHK files as calculation goes
 
-                 save         = True,  # save object as pkl file
-                 save_chk     = False, # save calculation as chkfile
-                 save_name    = "pymbxas_obj.h5", # name of saved file
-                 save_path    = None, # path of saved object
-                 gpu          = False,
-                 ):
+def _resolve_log_path(path, calculation_dir):
+    """Resolve a configured logfile relative to the calculation directory."""
+    if path is None:
+        return None
+    path = os.fspath(path)
+    if os.path.isabs(path):
+        return path
+    return os.path.abspath(os.path.join(calculation_dir, path))
 
-        # store directories and path
-        self._cdir = os.getcwd() # current directory
-        self._tdir = os.getcwd() if target_dir is None \
-            else os.path.abspath(target_dir) # target directory
 
-        if not os.path.exists(self._tdir):
-            os.makedirs(self._tdir)
+class PySCFMBXAS:
+    """One immutable ground-state definition with zero or more excitations."""
 
-        self._initialize_from_scratch(structure, charge, spin,
-                                      xc, basis, pbc, solvent, calc_type,
-                                      do_xch, xas_verbose, xas_logfile,
-                                      dft_verbose, dft_logfile, dft_output,
-                                      print_fchk, save, loc_type,
-                                      save_name, save_path, save_chk, gpu)
+    def __init__(self, structure, config=None, runtime=None):
+        if structure is None or not hasattr(structure, "copy"):
+            raise TypeError("structure must be an ASE Atoms object")
+        if config is None:
+            config = CalculationConfig()
+        if runtime is None:
+            runtime = RuntimeConfig()
+        if not isinstance(config, CalculationConfig):
+            raise TypeError("config must be a CalculationConfig")
+        if not isinstance(runtime, RuntimeConfig):
+            raise TypeError("runtime must be a RuntimeConfig")
 
-        return
-
-    def _initialize_from_scratch(self, structure, charge, spin,
-                                  xc, basis, pbc, solvent, calc_type,
-                                  do_xch, xas_verbose, xas_logfile,
-                                  dft_verbose, dft_logfile, dft_output,
-                                  print_fchk, save, loc_type,
-                                  save_name, save_path, save_chk, gpu):
-
-        # output, verbose and printing
-        self._output_settings = {
-            "print_fchk"   : print_fchk,
-            "xas_verbose"  : xas_verbose,
-            "xas_logfile"  : xas_logfile,
-            "dft_verbose"  : dft_verbose,
-            "dft_logfile"  : dft_logfile,
-            "dft_output"   : dft_output,
-            "save"         : save,
-            "save_chk"     : save_chk,
-            "save_path"    : save_path,
-            "save_name"    : save_name,
-            "is_gpu"       : gpu,
-            }
-        
-        # logger
-        configure_logger(xas_verbose, log_file=xas_logfile)
-        self.logger = logging.getLogger(__name__)  # Logger tied to this class
-
-        # check (#TODO in future allow to restart from a GS calculation)
-        self._ran_GS   = False
-        self._used_loc = False # becomes true if localization was needed
-
-        # store calculation details
-        self.structure = structure
-
-        # resolve and check PBC
-        pbc_resolved = check.check_pbc(pbc, structure)
+        self.structure = structure.copy()
+        pbc_resolved = check.check_pbc(config.pbc, self.structure)
         if pbc_resolved:
-            raise NotImplementedError("MBXAS is not supported under periodic boundary conditions: the position operator used for the transition dipoles (int1e_r) is not periodic, so the lattice-summed integrals are not physically meaningful. Use a molecular or cluster model instead.")
+            raise NotImplementedError(
+                "MBXAS is not supported under periodic boundary conditions: "
+                "the position operator is not periodic. Use a molecular or "
+                "cluster model instead.")
+        self.config = replace(config, pbc=pbc_resolved)
+        self.runtime = self._resolve_runtime(runtime)
+        os.makedirs(self.runtime.work_directory, exist_ok=True)
+        configure_logger(
+            self.runtime.logging.pymbxas_verbosity,
+            log_file=self.runtime.logging.pymbxas_logfile, file_mode="w")
+        self.logger = logging.getLogger(__name__)
 
-        self._parameters = {
-            "charge"   : charge,
-            "spin"     : spin,
-            "xc"       : xc,
-            "basis"    : basis,
-            "solvent"  : solvent,
-            "pbc"      : pbc_resolved,
-            "loc"      : loc_type,
-            "xch"      : do_xch,
-            "calc_type": calc_type,
-            # ... add more parameters as needed
-            }
+        self._ran_GS = False
+        self._used_loc = False
+        self.output = ""
+        self._excitations = []
+        self._last_excitation_outcomes = ()
+        self._h5_path = None
+        self._ground_state_provenance = {}
 
-        # initialize empty stuff
-        self.output        = {}
-        self.data          = {}
-        self._excitations  = []
-        self._h5_path      = None
+    @staticmethod
+    def _resolve_runtime(runtime):
+        logging_config = runtime.logging
+        logging_config = replace(
+            logging_config,
+            pymbxas_logfile=_resolve_log_path(
+                logging_config.pymbxas_logfile, runtime.work_directory),
+            pyscf_logfile=_resolve_log_path(
+                logging_config.pyscf_logfile, runtime.work_directory))
+        return replace(runtime, logging=logging_config)
 
-        return
-    
-    # run all pymbxas from scratch
-    def kernel(self, excitation):
-        """
-        Run all pymbxas calculations from scratch.
-        
-        Parameters:
-        excitation (list or int): Atom indices to excite.
-        
-        Returns:
-        None
-        """
-        
-        
-        header = """
-           |----------------------------------|
-           |                                  |
-           |>>>>>>   Starting PyMBXAS   <<<<<<|
-           |                                  |
-           |       ver {:>7} | {:<12} |
-           |----------------------------------|
-        """.format(pymbxas.__version__, pymbxas.__date__)
-        
-        self.logger.info(header)
-        
-        # change directory
-        os.chdir(self._tdir)
-        
-        # run ground state
+    def run(self, sites, *, config=None, channel=UNSET, xch=UNSET,
+            occupation=UNSET, mom_warmup_calls=UNSET, scf=UNSET,
+            fch_scf=UNSET, xch_scf=UNSET):
+        """Run the missing ground state and the requested excitations."""
+        excitation_config = resolve_excitation_config(
+            config, channel=channel, xch=xch, occupation=occupation,
+            mom_warmup_calls=mom_warmup_calls, scf=scf,
+            fch_scf=fch_scf, xch_scf=xch_scf)
+        self.logger.info(
+            "Starting PyMBXAS\n%s",
+            format_log_fields({
+                "version": pymbxas.__version__,
+                "release date": pymbxas.__date__,
+                "formula": self.structure.get_chemical_formula(),
+                "atoms": len(self.structure),
+                "requested excitation": sites,
+                "target directory": self.runtime.work_directory,
+                "device": self.runtime.device.value.upper(),
+                "calculator": self.config.method,
+                "xc": self.config.xc,
+                "basis": self.config.basis,
+                "XCH alignment": excitation_config.xch,
+                "occupation method": excitation_config.occupation.value,
+                "MOM warm-up calls": (
+                    excitation_config.mom_warmup_calls
+                    if excitation_config.occupation.value == "mixed"
+                    else None),
+                "SCF DIIS / mixing cycles": (
+                    f"{excitation_config.resolved_fch_scf.diis_cycles} / "
+                    f"{excitation_config.resolved_fch_scf.mixing_cycles}"),
+                "second-order recovery": (
+                    excitation_config.resolved_fch_scf.second_order),
+            }))
+        self.logger.info("")
         self.run_ground_state()
+        outcomes = self.excite(sites, config=excitation_config)
+        remove_tmp_files(self.runtime.work_directory)
+        return outcomes
 
-        # run all specified excitations
-        self.excite(excitation)
-
-        # save object if needed
-        if self.oset["save"]:
-            self.logger.info("Saved everything as {}".format(self.save_object()))
-            
-        # go back where we were
-        os.chdir(self._cdir)
-        
-        self.logger.info("PyMBXAS finished successfully!")
-        
-        # clean up mess
-        remove_tmp_files(self._tdir)
-        
-        return
-
-    # excite an atom or a list of atoms
-    def excite(self, ato_idxs, channel=1):
+    def excite(self, sites, *, config=None, channel=UNSET, xch=UNSET,
+               occupation=UNSET, mom_warmup_calls=UNSET, scf=UNSET,
+               fch_scf=UNSET, xch_scf=UNSET):
+        excitation_config = resolve_excitation_config(
+            config, channel=channel, xch=xch, occupation=occupation,
+            mom_warmup_calls=mom_warmup_calls, scf=scf,
+            fch_scf=fch_scf, xch_scf=xch_scf)
         
         if not self._ran_GS:
-            self.logger.error("Please run a GS calculation first.")
-            return
+            message = "Cannot excite atoms before the ground state has run"
+            self.logger.error(message)
+            raise RuntimeError(message)
             
         # convert into atom indexes
-        to_excite = atoms_to_indexes(self.structure, ato_idxs)
+        to_excite = atoms_to_indexes(self.structure, sites)
         
         # iterate over the indexes 
+        outcomes = []
         for ato_idx in to_excite:
-            self._single_excite(ato_idx, channel)
-            
-            # save object if needed
-            if self.oset["save"]:
-                self.save_object()
+            outcomes.append(self._single_excite(ato_idx, excitation_config))
         
-        return
-    
-    # perform a single excitation
-    def _single_excite(self, ato_idx, channel):
+        self._last_excitation_outcomes = tuple(outcomes)
+        self._log_excitation_summary(self._last_excitation_outcomes)
+        return self._last_excitation_outcomes
 
-        if ato_idx in self.excited_idxs:
-            return
+    # perform a single excitation
+    def _single_excite(self, ato_idx, config):
+
+        symbol = self.structure.get_chemical_symbols()[ato_idx]
+        site_logger = with_log_context(
+            self.logger, site=f"{symbol}:{ato_idx}")
+        identity = (ato_idx, config.channel_index, config)
+        if any((exc.ato_idx, exc.channel, exc.config) == identity
+               for exc in self.excitations):
+            site_logger.info("Equivalent excitation already exists; skipping")
+            return ExcitationOutcome(ato_idx, symbol, "skipped")
 
         try:
-            excitation = Excitation(self.structure, self.gs_data, ato_idx,
-                                    self.parameters, channel, self.df_obj,
-                                    self.oset, self.logger)
+            excitation = Excitation(
+                self.structure, self.gs_data, ato_idx, config)
+            excitation.run(
+                self.structure, self.gs_data, self.config, self.runtime,
+                self.df_obj, self.logger)
             self._excitations.append(excitation)
+            if self.runtime.checkpoint.enabled:
+                self.save()
         except (ValueError, RuntimeError) as e:
-            self.logger.error(str(e))
+            site_logger.error("Excitation failed: %s", e)
+            return ExcitationOutcome(ato_idx, symbol, "failed", str(e))
 
-        return
+        return ExcitationOutcome(ato_idx, symbol, "succeeded")
+
+    def _log_excitation_summary(self, outcomes):
+        """Log a truthful aggregate result for the current request."""
+        outcomes = tuple(outcomes)
+        succeeded = [item for item in outcomes if item.status == "succeeded"]
+        failed = [item for item in outcomes if item.status == "failed"]
+        skipped = [item for item in outcomes if item.status == "skipped"]
+        self.logger.info("")
+        message = "Run completed" if not failed else "Run completed with failures"
+        fields = format_log_fields({
+            "succeeded": len(succeeded),
+            "failed": len(failed),
+            "skipped": len(skipped),
+        })
+        if failed:
+            self.logger.error("%s\n%s", message, fields)
+            for item in failed:
+                self.logger.error(
+                    "[%s:%d] %s", item.symbol, item.atom_index, item.message)
+        else:
+            self.logger.info("%s\n%s", message, fields)
         
 
     # run the GS calculation
@@ -234,7 +232,8 @@ class PySCF_mbxas():
 
         # check if GS was already performed, if so: skip
         if self._ran_GS and not force:
-            self.logger.warning("GS already ran with this configuration. Skipping.")
+            with_log_context(self.logger, stage="GS").warning(
+                "Ground state already exists; skipping")
             return
 
         if force and self._excitations:
@@ -243,29 +242,32 @@ class PySCF_mbxas():
                 "the current one. Start a new calculation instead.".format(
                     len(self._excitations)))
 
-        self.logger.info("Started a new GS calculation")
+        gs_logger = with_log_context(self.logger, stage="GS")
+        gs_logger.info("Starting calculation")
         
         start_time  = time.time()
 
-        # get system settings
-        charge    = self.parameters["charge"]
-        spin      = self.parameters["spin"]
-        basis     = self.parameters["basis"]
-        xc        = self.parameters["xc"]
-        pbc       = self.parameters["pbc"]
-        solvent   = self.parameters["solvent"]
-        calc_type = self.parameters["calc_type"]
+        xc        = self.config.xc
+        pbc       = self.config.pbc
+        solvent   = self.config.solvent
+        calc_type = self.config.method
+        scf_config = self.config.ground_state_scf
         
         # generate molecule
-        gs_mol = self.make_mol(charge, spin, basis, pbc)
+        gs_mol = self._make_ground_state_mol()
         
         # generate KS calculator
         gs_calc = make_pyscf_calculator(gs_mol, xc, pbc=pbc, solvent=solvent,
                                         calc_type=calc_type, dens_fit=None,
-                                        calc_name="gs", save=self.oset["save_chk"],
-                                        is_gpu=self.oset["is_gpu"])
+                                        calc_name=os.path.join(
+                                            self.runtime.work_directory, "gs"),
+                                        save=self.runtime.checkpoint.pyscf_chkfiles,
+                                        is_gpu=self.runtime.is_gpu,
+                                        max_cycle=scf_config.max_cycles,
+                                        conv_tol=scf_config.convergence_tolerance,
+                                        grid_level=scf_config.grid_level)
 
-        # run SCF #TODO: check how to change convergence parameters
+        # Run the ordinary ground-state SCF.
         gs_calc.kernel()
         if not gs_calc.converged:
             raise RuntimeError("Ground state SCF did not converge")
@@ -283,17 +285,25 @@ class PySCF_mbxas():
             self.df_obj = None
 
         # check if localization is needed and run it
-        self._run_localization(self.gs_data, self.parameters["loc"])
+        self._run_localization(self.gs_data, self.config.localization)
         
         # write output fchk files if using mokit
-        if self.oset["print_fchk"]:
+        if self.runtime.checkpoint.fchk_files:
             self._print_fchk_files()
 
         # mark that GS has been run
         self._ran_GS = True
+        self._ground_state_provenance = {
+            "device": self.runtime.device.value,
+            "pymbxas_version": pymbxas.__version__,
+            "pyscf_version": pyscf.__version__,
+        }
         self.mol.stdout.close()
         
-        self.logger.info(u"GS finished in {:.1f} s.\n".format(time.time() - start_time))
+        log_scf_completion(
+            gs_logger, gs_calc, time.time() - start_time)
+        if self.runtime.checkpoint.enabled:
+            self.save()
         return
     
     # run localization procedure
@@ -334,8 +344,18 @@ class PySCF_mbxas():
 
         mo_loc = do_localization_pyscf(dft_calc, s1_orbitals, loc_type)
 
-        self.logger.info("{} localization : alpha {} | beta {}".format(
-            loc_type.upper(), s1_orbitals[0], s1_orbitals[1]))
+        localization_logger = with_log_context(
+            self.logger, stage="GS localization")
+        localization_logger.info(
+            "%s completed\n%s", loc_type.upper(), format_log_fields({
+                "alpha orbital count": len(s1_orbitals[0]),
+                "beta orbital count": len(s1_orbitals[1]),
+            }))
+        localization_logger.debug(
+            "Localized orbital indices\n%s", format_log_fields({
+                "alpha": s1_orbitals[0],
+                "beta": s1_orbitals[1],
+            }))
         
         self._used_loc = True
         
@@ -353,33 +373,46 @@ class PySCF_mbxas():
         if self._used_loc:
             write_data_to_fchk(self.mol,
                                mo_coeff = self.gs_data.mo_coeff_del,
-                               oname    = self._tdir + "/output_gs_del.fchk",
+                               oname=os.path.join(
+                                   self.runtime.work_directory,
+                                   "output_gs_del.fchk"),
                                )
 
             write_data_to_fchk(self.mol,
                                mo_coeff = self.gs_data.mo_coeff,
-                               oname    = self._tdir + "/output_gs_loc.fchk",
+                               oname=os.path.join(
+                                   self.runtime.work_directory,
+                                   "output_gs_loc.fchk"),
                                )
 
         else:
             write_data_to_fchk(self.mol,
                                mo_coeff = self.gs_data.mo_coeff,
-                               oname    = self._tdir + "/output_gs.fchk",
+                               oname=os.path.join(
+                                   self.runtime.work_directory,
+                                   "output_gs.fchk"),
                                )
 
         return
     
 
     def get_mbxas_spectra(self, ato_idx, axis=None, sigma=0.5, npoints=3001, tol=0.01,
-                          erange=None, shakeup_order=None, spectator_order=None,
-                          max_total_order=None, shakedown_only=False):
+                          erange=None, f_order=1, spectator_order="auto",
+                          max_total_order=None,
+                          max_configurations=2_000_000):
 
         ato_idxs = atoms_to_indexes(self.structure, ato_idx)
         matched = [i for i, exc in enumerate(self.excitations) if exc.ato_idx in ato_idxs]
         if not matched:
             raise ValueError(f"No excitations found for atom index/label {ato_idx!r}")
+        matched_sites = [self.excitations[i].ato_idx for i in matched]
+        if len(matched_sites) != len(set(matched_sites)):
+            raise ValueError(
+                "Multiple excitation configurations exist for at least one "
+                "requested site; select an explicit result with "
+                "to_spectra(index=...)")
 
-        spectras = [self.to_spectra(i) for i in matched]
+        spectras = [self.to_spectra(index=i) for i in matched]
 
         if erange is None:
             all_energies = np.concatenate([sp.energies for sp in spectras])
@@ -391,47 +424,36 @@ class PySCF_mbxas():
             energy, intensity = sp.get_mbxas_spectra(axis=axis, sigma=sigma,
                                                       npoints=npoints, tol=tol,
                                                       erange=erange,
-                                                      shakeup_order=shakeup_order,
+                                                      f_order=f_order,
                                                       spectator_order=spectator_order,
                                                       max_total_order=max_total_order,
-                                                      shakedown_only=shakedown_only)
+                                                      max_configurations=max_configurations)
             intensity_sum = intensity if intensity_sum is None else intensity_sum + intensity
 
         return energy, intensity_sum
 
-    def save_object(self, oname=None, save_path=None):
-        """
-        Write the calculation to an HDF5 file, appending any excitation that
-        is not on disk yet.
-
-        Returns:
-        str: path of the file written.
-        """
+    def save(self, path=None):
+        """Checkpoint the ground state and every completed excitation."""
 
         if not self._ran_GS:
             raise RuntimeError("Cannot save before the ground state has been run.")
 
-        path = self._resolve_save_path(oname, save_path)
+        if path is None:
+            path = self._h5_path or self.runtime.checkpoint_path
+        path = os.path.abspath(os.fspath(path))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        if not os.path.exists(path):
+        same_backing_file = (
+            self._h5_path is not None
+            and os.path.abspath(self._h5_path) == os.path.abspath(path)
+        )
+        if not same_backing_file or not os.path.exists(path):
             self._write_header(path)
 
         self._append_excitations(path)
         self._h5_path = path
 
         return path
-
-    def _resolve_save_path(self, oname, save_path):
-
-        if oname is None:
-            oname = self.oset["save_name"]
-
-        root = self._tdir if save_path is None else save_path
-
-        if not oname.endswith(".h5"):
-            oname = os.path.splitext(oname)[0] + ".h5"
-
-        return os.path.join(root, oname)
 
     def _write_header(self, path):
 
@@ -440,8 +462,10 @@ class PySCF_mbxas():
             f.attrs["used_loc"] = bool(self._used_loc)
 
             h5.write_structure(f, "structure", self.structure)
-            h5.write_json(f, "parameters", self._parameters)
-            h5.write_json(f, "output_settings", self._output_settings)
+            h5.write_json(f, "calculation_config", self.config.to_dict())
+            h5.write_json(
+                f, "ground_state_provenance",
+                self._ground_state_provenance)
             h5.write_text(f, "output", self.output if isinstance(self.output, str) else "")
             h5.write_snapshot(f, self.gs_data)
 
@@ -467,6 +491,8 @@ class PySCF_mbxas():
                 group.attrs["symbol"]  = exc.symbol
                 group.attrs["channel"] = int(exc.channel)
                 group.attrs["orb_idx"] = int(exc.orb_idx)
+                h5.write_json(group, "config", exc.config.to_dict())
+                h5.write_json(group, "provenance", exc.provenance)
 
                 for name in ("fch", "xch"):
                     if name not in exc.data:
@@ -483,23 +509,36 @@ class PySCF_mbxas():
 
         return
     
-    # restart object from pkl file previously saved
     @classmethod
-    def load(cls, filename):
-        """Reopen a calculation previously written with save_object()."""
+    def load(cls, filename, *, runtime=None):
+        """Restore scientific state exactly with an optional new runtime."""
 
         obj = cls.__new__(cls)
-        obj._load_h5(filename)
+        obj._load_h5(filename, runtime=runtime)
         return obj
 
-    def _load_h5(self, filename):
+    def _load_h5(self, filename, runtime=None):
 
         path = os.path.abspath(filename)
+        if runtime is None:
+            runtime = RuntimeConfig(
+                work_directory=os.path.dirname(path),
+                checkpoint=CheckpointConfig(filename=os.path.basename(path)))
+        if not isinstance(runtime, RuntimeConfig):
+            raise TypeError("runtime must be a RuntimeConfig")
+        self.runtime = self._resolve_runtime(runtime)
+        os.makedirs(self.runtime.work_directory, exist_ok=True)
 
         with h5.open_read(path, h5.KIND_CALCULATION) as f:
+            if "calculation_config" not in f:
+                raise ValueError(
+                    "Checkpoint uses the pre-configuration calculation schema; "
+                    "re-run the calculation with this PyMBXAS version")
             self.structure        = h5.read_structure(f, "structure")
-            self._parameters      = h5.read_json(f, "parameters")
-            self._output_settings = h5.read_json(f, "output_settings")
+            self.config = CalculationConfig.from_dict(
+                h5.read_json(f, "calculation_config"))
+            self._ground_state_provenance = h5.read_json(
+                f, "ground_state_provenance")
             self.output           = h5.read_text(f, "output")
             self._ran_GS          = bool(f.attrs["ran_GS"])
             self._used_loc        = bool(f.attrs["used_loc"])
@@ -512,8 +551,9 @@ class PySCF_mbxas():
                 else:
                     incomplete.append(key)
 
-        configure_logger(self._output_settings["xas_verbose"],
-                         log_file=self._output_settings["xas_logfile"])
+        configure_logger(
+            self.runtime.logging.pymbxas_verbosity,
+            log_file=self.runtime.logging.pymbxas_logfile, file_mode="a")
         self.logger = logging.getLogger(__name__)
 
         for key in incomplete:
@@ -521,54 +561,68 @@ class PySCF_mbxas():
 
         self.gs_data     = h5.read_snapshot(path, "/")
         self.mol         = self.gs_data.mol
-        self.mol.verbose = self._output_settings["dft_verbose"]
+        self.mol.verbose = self.runtime.logging.pyscf_verbosity
         self.df_obj      = None
 
-        self._cdir        = os.getcwd()
-        self._tdir        = os.path.dirname(path) or os.getcwd()
         self._h5_path     = path
         self._excitations = [Excitation.from_h5(path, key) for key in complete]
+        self._last_excitation_outcomes = ()
 
         return
     
     @property
-    def oset(self):
-        return self._output_settings.copy()
-    
-    @property
-    def parameters(self):
-        return self._parameters.copy()
-    
-    @property
     def excitations(self):
         return self._excitations
+
+    @property
+    def last_excitation_outcomes(self):
+        """Outcomes from the most recent :meth:`excite` request."""
+        return self._last_excitation_outcomes
     
     @property
     def excited_idxs(self):
         return [exc.ato_idx for exc in self.excitations]
-    
+
+    @property
+    def excitation_keys(self):
+        return [(exc.ato_idx, exc.channel, exc.config) for exc in self.excitations]
+
     # convert object to Spectra object
-    def to_spectra(self, excitation=None):
-        
-        if excitation is None:
+    def to_spectra(self, *, index=None):
+
+        if index is None:
             indexes = list(range(len(self.excitations)))
         else:
-            indexes = as_list(excitation)
-            
+            indexes = as_list(index)
+
         spectras = [Spectra(self, excitation=cc) for cc in indexes]
-        
+
         if len(spectras) == 1:
             return spectras[0]
         else:
             return Spectras(spectras)
-        
+
     # internal function to generate a pyscf mol obj
-    def make_mol(self, charge, spin, basis, pbc):
-        
-        mol = ase_to_mole(self.structure, charge, spin, basis=basis, pbc=pbc,
-                             verbose=self.oset["dft_verbose"],
-                             print_output=self.oset["dft_output"],
-                             log_file=self.oset["dft_logfile"],
-                             is_gpu=self.oset["is_gpu"])
+    def _make_ground_state_mol(self):
+        logging_config = self.runtime.logging
+
+        mol = ase_to_mole(
+            self.structure, self.config.charge, self.config.spin,
+            basis=self.config.basis, pbc=self.config.pbc,
+                             verbose=logging_config.pyscf_verbosity,
+                             print_output=logging_config.pyscf_console,
+                             log_file=logging_config.pyscf_logfile,
+                             is_gpu=self.runtime.is_gpu,
+                             log_context={
+                                 "stage": "GS",
+                                 "calculator": self.config.method,
+                                 "xc": (("LDA" if self.config.xc is None
+                                         else self.config.xc)
+                                        if "KS" in self.config.method
+                                        else None),
+                             })
         
         return mol
+
+
+__all__ = ["ExcitationOutcome", "PySCFMBXAS"]

@@ -1,5 +1,10 @@
 # Maxvol-based shake-up configuration search
 
+> **Historical design record.** Reference comparison after implementation
+> showed that the Python search is maxvol-style but is not a port of QE's
+> `maxvol_multi`; QE's spectral doubles/triples use a different adaptive
+> enumeration. See `dev/shakeup.md` and the 2026-08-25 scientific review.
+
 ## Problem
 
 `mbxas/shakeup.py` prunes order-2 shake-up combinatorics by a magnitude-rank-and-grow heuristic (`_shakeup_sticks_order2`): sort all valence->conduction singles by `|K|**2`, geometrically grow an active prefix, form 2x2 minors within it, stop by mass convergence. It is hard-capped at `MAX_IMPLEMENTED_ORDER=2` because brute-force k-tuple enumeration is combinatorial and nothing prunes it past pairs.
@@ -73,4 +78,4 @@ Extends `tests/test_h2o_kedge.py` (per the existing "one calculation, add assert
 ## Documentation
 
 - `dev/method.md`: update the shake-up section to describe the maxvol-based search and the Jacobi complementary-minor identity underpinning it; remove references to the order-2-only limitation and the magnitude-rank-and-grow heuristic it replaces.
-- `CHANGELOG.md`: `### Changed` entry — shake-up satellite search now uses a maxvol-based configuration search instead of magnitude-pruned order-2-only combinatorics, and can surface order-3+ configurations. This changes computed shake-up spectra (per `CLAUDE.md`'s "a change that alters computed numbers always gets a Changed entry" rule), so state plainly that shake-up intensities may shift slightly and higher-order satellites may now appear.
+- `CHANGELOG.md`: `### Changed` entry — shake-up satellite search now uses a maxvol-based configuration search instead of magnitude-pruned order-2-only combinatorics, and can surface order-3+ configurations. This changes computed shake-up spectra (per `AGENTS.md`'s "a change that alters computed numbers always gets a Changed entry" rule), so state plainly that shake-up intensities may shift slightly and higher-order satellites may now appear.

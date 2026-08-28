@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 #%%
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 KIND_CALCULATION = "calculation"
 KIND_SPECTRA     = "spectra"

@@ -13,9 +13,12 @@ import ase.visualize
 from ase.calculators.singlepoint import SinglePointCalculator
 
 # system stuff
+import logging
 import os
 # this repo
 from pymbxas.build.structure import mole_to_ase
+
+logger = logging.getLogger(__name__)
 
 #%%
 
@@ -46,10 +49,9 @@ class AIMDTrajWriter():
         # avoid opening data_output file twice
         if type(data_output) is str:
             if os.path.isfile(data_output):
-                print('overwrite data output file: %s' %
-                      data_output)
+                logger.info("Overwriting AIMD data output: %s", data_output)
             else:
-                print('data output file: %s' % data_output)
+                logger.info("AIMD data output: %s", data_output)
 
             if data_output == '/dev/null':
                 self.data_output = open(os.devnull, 'w')

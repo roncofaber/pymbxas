@@ -1782,7 +1782,7 @@ git commit -m "Drop dill from the package"
 - Modify: `CITATION.cff:8-9`
 - Modify: `CHANGELOG.md`
 - Modify: `README.md:80,82,117,133-136`
-- Modify: `CLAUDE.md:6,75`
+- Modify: `AGENTS.md:6,75`
 - Modify: `dev/architecture.md:124,131-138`
 
 **Interfaces:**
@@ -1862,7 +1862,7 @@ obj.excite("N")
 The file follows PySCF's chkfile layout for the ground state, so `pyscf.scf.chkfile.load_scf` and `mf.from_chk` also work on it.
 ````
 
-- [ ] **Step 4: Update CLAUDE.md**
+- [ ] **Step 4: Update AGENTS.md**
 
 Line 6, replace `dill` with `h5py` in the stack list.
 
@@ -1904,11 +1904,11 @@ Expected: all pass.
 Run: `conda run -n pymbxas python -c "import pymbxas; print(pymbxas.__version__)"`
 Expected: `0.6.0`.
 
-Run: `grep -rn "pkl\|dill" README.md CLAUDE.md dev/ pymbxas/ setup.cfg | grep -v "\.pyc"`
-Expected: only the deliberate mentions, namely the removal notes in `CLAUDE.md`, `dev/architecture.md` and the `open_read` error message in `pymbxas/io/h5.py`.
+Run: `grep -rn "pkl\|dill" README.md AGENTS.md dev/ pymbxas/ setup.cfg | grep -v "\.pyc"`
+Expected: only the deliberate mentions, namely the removal notes in `AGENTS.md`, `dev/architecture.md` and the `open_read` error message in `pymbxas/io/h5.py`.
 
 ```bash
-git add pymbxas/__init__.py CITATION.cff CHANGELOG.md README.md CLAUDE.md dev/architecture.md
+git add pymbxas/__init__.py CITATION.cff CHANGELOG.md README.md AGENTS.md dev/architecture.md
 git commit -m "Document HDF5 persistence and bump to 0.6.0"
 ```
 

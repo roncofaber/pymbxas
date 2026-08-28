@@ -251,6 +251,7 @@ def _hand_built_spectra():
     sp._label     = 7
     sp._mb_overlap    = np.arange(2 * nao * nao, dtype=np.float64).reshape(2, nao, nao)
     sp._fch_mo_energy = np.linspace(-20.0, 5.0, 2 * nao).reshape(2, nao)
+    sp._gs_mo_energy  = np.asarray(mf.mo_energy)
     sp._gs_mo_occ     = np.asarray(mf.mo_occ)
     sp._core_orb_idx  = 0
     return sp
@@ -270,6 +271,7 @@ def test_spectra_roundtrip(tmp_path):
     assert np.array_equal(back._amplitude, sp._amplitude)
     assert np.array_equal(back._mo_coeff, sp._mo_coeff)
     assert np.array_equal(back._mo_occ, sp._mo_occ)
+    assert np.array_equal(back._gs_mo_energy, sp._gs_mo_energy)
     assert np.array_equal(back._el_labels, sp._el_labels)
     assert np.array_equal(back.CMO, sp.CMO)
     assert back._channel == 1
@@ -280,6 +282,19 @@ def test_spectra_roundtrip(tmp_path):
     assert back.structure == sp.structure
     assert back.mol.natm == 3
     assert np.allclose(back.mol.atom_coords(), sp.mol.atom_coords())
+
+
+def test_historical_spectra_without_gs_mo_energy_still_loads(tmp_path):
+    from pymbxas.spectra import Spectra
+
+    sp = _hand_built_spectra()
+    path = tmp_path / "historical-spectra.h5"
+    sp.save(str(path))
+    with h5py.File(path, "r+") as f:
+        del f["shakeup/gs_mo_energy"]
+
+    back = Spectra.load(str(path))
+    assert back._gs_mo_energy is None
 
 
 def test_spectra_load_defers_mo_coeff(tmp_path):
@@ -352,22 +367,29 @@ def test_spectras_constructor_rejects_a_path(tmp_path):
 
 @pytest.fixture(scope="session")
 def tiny_calc(tmp_path_factory):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.calculators.pyscf import PySCFMBXAS
+    from pymbxas.config import (
+        CalculationConfig, CheckpointConfig, LoggingConfig, RuntimeConfig,
+    )
 
     workdir = tmp_path_factory.mktemp("tiny")
-    obj = PySCF_mbxas(
-        structure=ase.build.molecule("H2O"),
-        charge=0, spin=0, xc="lda", basis="sto-3g", calc_type="UKS",
-        loc_type="ibo", xas_verbose=1, dft_verbose=0, dft_output=False,
-        save=False, target_dir=str(workdir))
-    obj.kernel("O")
+    obj = PySCFMBXAS(
+        ase.build.molecule("H2O"),
+        config=CalculationConfig(xc="lda", basis="sto-3g"),
+        runtime=RuntimeConfig(
+            work_directory=workdir,
+            logging=LoggingConfig(
+                pymbxas_verbosity=1, pyscf_verbosity=0,
+                pyscf_console=False),
+            checkpoint=CheckpointConfig(enabled=False)))
+    obj.run("O")
     return obj
 
 
-def test_save_object_writes_chkfile_shaped_root(tiny_calc, tmp_path):
+def test_save_writes_configs_and_chkfile_shaped_root(tiny_calc, tmp_path):
     from pyscf.scf import chkfile as pyscf_chkfile
 
-    path = tiny_calc.save_object(oname="calc.h5", save_path=str(tmp_path))
+    path = tiny_calc.save(tmp_path / "calc.h5")
     assert path == str(tmp_path / "calc.h5")
 
     with h5py.File(path, "r") as f:
@@ -385,11 +407,15 @@ def test_save_object_writes_chkfile_shaped_root(tiny_calc, tmp_path):
         assert int(exc.attrs["channel"]) == 1
         assert int(exc.attrs["orb_idx"]) == tiny_calc.excitations[0].orb_idx
         assert bool(exc.attrs["complete"]) is True
-        assert set(exc) == {"fch", "xch", "mbxas"}
+        assert set(exc) == {
+            "config", "provenance", "fch", "xch", "mbxas"}
         assert set(exc["mbxas"]) == {"energies", "absorption", "mb_overlap",
                                      "dipole_KS", "basis_ovlp"}
         assert h5.read_text(exc["fch"], "output").startswith("")
-        assert h5.read_json(f, "parameters")["xc"] == "lda"
+        assert h5.read_json(f, "calculation_config") == tiny_calc.config.to_dict()
+        assert h5.read_json(exc, "config") == tiny_calc.excitations[0].config.to_dict()
+        assert h5.read_json(f, "ground_state_provenance")["device"] == "cpu"
+        assert h5.read_json(exc, "provenance")["device"] == "cpu"
         assert h5.read_structure(f, "structure") == tiny_calc.structure
 
     mol_chk, scf_chk = pyscf_chkfile.load_scf(path)
@@ -397,75 +423,102 @@ def test_save_object_writes_chkfile_shaped_root(tiny_calc, tmp_path):
     assert np.array_equal(scf_chk["mo_coeff"], np.asarray(tiny_calc.gs_data.mo_coeff))
 
 
-def test_save_object_is_append_only(tiny_calc, tmp_path):
-    path = tiny_calc.save_object(oname="append.h5", save_path=str(tmp_path))
+def test_save_is_append_only(tiny_calc, tmp_path):
+    path = tiny_calc.save(tmp_path / "append.h5")
 
     with h5py.File(path, "r+") as f:
         f["excitations/000"].attrs["sentinel"] = 42
 
-    tiny_calc.save_object(oname="append.h5", save_path=str(tmp_path))
+    tiny_calc.save(path)
 
     with h5py.File(path, "r") as f:
         assert int(f["excitations/000"].attrs["sentinel"]) == 42
 
 
-def test_save_object_rewrites_incomplete_groups(tiny_calc, tmp_path):
-    path = tiny_calc.save_object(oname="partial.h5", save_path=str(tmp_path))
+def test_fresh_save_replaces_stale_target(tiny_calc, tmp_path):
+    path = tiny_calc.save(tmp_path / "fresh.h5")
+
+    with h5py.File(path, "r+") as f:
+        f["excitations"].create_group("999").attrs["complete"] = True
+
+    # Simulate a new in-memory calculation choosing an existing output name.
+    tiny_calc._h5_path = None
+    tiny_calc.save(path)
+
+    with h5py.File(path, "r") as f:
+        assert sorted(f["excitations"]) == ["000"]
+
+
+def test_save_rewrites_incomplete_groups(tiny_calc, tmp_path):
+    path = tiny_calc.save(tmp_path / "partial.h5")
 
     with h5py.File(path, "r+") as f:
         del f["excitations/000"].attrs["complete"]
         f["excitations/000"].attrs["sentinel"] = 42
 
-    tiny_calc.save_object(oname="partial.h5", save_path=str(tmp_path))
+    tiny_calc.save(path)
 
     with h5py.File(path, "r") as f:
         assert "sentinel" not in f["excitations/000"].attrs
         assert bool(f["excitations/000"].attrs["complete"]) is True
 
 
-def test_save_object_normalizes_the_extension(tiny_calc, tmp_path):
-    path = tiny_calc.save_object(oname="named.pkl", save_path=str(tmp_path))
-    assert path == str(tmp_path / "named.h5")
+def test_save_requires_a_ground_state(tmp_path):
+    from pymbxas.calculators.pyscf import PySCFMBXAS
+    from pymbxas.config import CalculationConfig, RuntimeConfig
 
-
-def test_save_object_requires_a_ground_state(tmp_path):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
-
-    obj = PySCF_mbxas(
-        structure=ase.build.molecule("H2O"), basis="sto-3g",
-        xas_verbose=1, dft_verbose=0, dft_output=False, save=False,
-        target_dir=str(tmp_path))
+    obj = PySCFMBXAS(
+        ase.build.molecule("H2O"),
+        config=CalculationConfig(basis="sto-3g"),
+        runtime=RuntimeConfig(work_directory=tmp_path))
 
     with pytest.raises(RuntimeError, match="ground state"):
-        obj.save_object()
+        obj.save()
 
 
 def test_load_restores_the_ground_state(tiny_calc, tmp_path):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.calculators.pyscf import PySCFMBXAS
 
-    path = tiny_calc.save_object(oname="restart.h5", save_path=str(tmp_path))
-    back = PySCF_mbxas.load(path)
+    path = tiny_calc.save(tmp_path / "restart.h5")
+    back = PySCFMBXAS.load(path)
 
     assert back._ran_GS is True
     assert back._used_loc is False
     assert back.df_obj is None
-    assert back.parameters == tiny_calc.parameters
+    assert back.config == tiny_calc.config
     assert back.structure == tiny_calc.structure
     assert np.array_equal(back.gs_data.mo_coeff, tiny_calc.gs_data.mo_coeff)
     assert np.array_equal(back.gs_data.mo_occ, tiny_calc.gs_data.mo_occ)
     assert back.gs_data.e_tot == tiny_calc.gs_data.e_tot
     assert back.gs_data.nelec == tiny_calc.gs_data.nelec
     assert back.mol.natm == 3
-    assert back._tdir == str(tmp_path)
-    assert back._cdir == os.getcwd()
+    assert back.runtime.work_directory == str(tmp_path)
     assert back.logger is not None
 
 
-def test_load_restores_excitations_lazily(tiny_calc, tmp_path):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+def test_load_accepts_runtime_but_not_scientific_overrides(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCFMBXAS
+    from pymbxas.config import LoggingConfig, RuntimeConfig
 
-    path = tiny_calc.save_object(oname="lazyexc.h5", save_path=str(tmp_path))
-    back = PySCF_mbxas.load(path)
+    path = tiny_calc.save(tmp_path / "verbosity.h5")
+    analysis_log = tmp_path / "analysis.log"
+    runtime = RuntimeConfig(
+        work_directory=tmp_path,
+        logging=LoggingConfig(
+            pymbxas_logfile=analysis_log, pyscf_verbosity=4,
+            pyscf_console=False))
+    back = PySCFMBXAS.load(path, runtime=runtime)
+
+    assert back.mol.verbose == 4
+    assert back.runtime.logging.pymbxas_logfile == str(analysis_log)
+    assert back.config == tiny_calc.config
+
+
+def test_load_restores_excitations_lazily(tiny_calc, tmp_path):
+    from pymbxas.calculators.pyscf import PySCFMBXAS
+
+    path = tiny_calc.save(tmp_path / "lazyexc.h5")
+    back = PySCFMBXAS.load(path)
 
     assert len(back.excitations) == 1
     assert back.excited_idxs == [0]
@@ -476,6 +529,8 @@ def test_load_restores_excitations_lazily(tiny_calc, tmp_path):
     assert exc.symbol == "O"
     assert exc.channel == ref.channel
     assert exc.orb_idx == ref.orb_idx
+    assert exc.config == ref.config
+    assert exc.provenance == ref.provenance
     assert set(exc.data) == {"fch", "xch"}
     assert "mo_coeff" not in vars(exc.data["fch"])
     assert np.array_equal(exc.data["fch"].mo_coeff, ref.data["fch"].mo_coeff)
@@ -486,52 +541,90 @@ def test_load_restores_excitations_lazily(tiny_calc, tmp_path):
 
 
 def test_loaded_object_skips_a_finished_atom(tiny_calc, tmp_path):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.calculators.pyscf import PySCFMBXAS
 
-    path = tiny_calc.save_object(oname="skip.h5", save_path=str(tmp_path))
-    back = PySCF_mbxas.load(path)
+    path = tiny_calc.save(tmp_path / "skip.h5")
+    back = PySCFMBXAS.load(path)
 
     back.excite(0)
     assert len(back.excitations) == 1
 
 
+def test_same_site_with_different_config_is_retained(tiny_calc, tmp_path,
+                                                     monkeypatch):
+    from dataclasses import replace
+    from pymbxas.config import CheckpointConfig, ExcitationConfig
+    from pymbxas.calculators.pyscf import PySCFMBXAS
+    from pymbxas.calculators.excitation import Excitation
+
+    path = tiny_calc.save(tmp_path / "variants.h5")
+    back = PySCFMBXAS.load(path)
+    original = back.excitations[0]
+    variant = ExcitationConfig(channel="alpha")
+    back.runtime = replace(
+        back.runtime, checkpoint=CheckpointConfig(enabled=False))
+    monkeypatch.setattr(Excitation, "run", lambda self, *args: self)
+    outcomes = back.excite(0, config=variant)
+    assert outcomes[0].status == "succeeded"
+    assert back.excitations[-1].config == variant
+    assert original.config.channel.value == "beta"
+    with pytest.raises(ValueError, match="Multiple excitation configurations"):
+        back.get_mbxas_spectra(0)
+
+
 def test_loaded_object_produces_a_spectra(tiny_calc, tmp_path):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.calculators.pyscf import PySCFMBXAS
     from pymbxas.spectra import Spectra
 
-    path = tiny_calc.save_object(oname="tospectra.h5", save_path=str(tmp_path))
-    spectra = PySCF_mbxas.load(path).to_spectra()
+    path = tiny_calc.save(tmp_path / "tospectra.h5")
+    spectra = PySCFMBXAS.load(path).to_spectra()
 
     assert isinstance(spectra, Spectra)
     assert np.array_equal(spectra._energies, tiny_calc.excitations[0].mbxas["energies"])
+    assert np.array_equal(spectra._gs_mo_energy, tiny_calc.gs_data.mo_energy)
+
+
+def test_real_spectra_builds_orbital_rearrangement(tiny_calc):
+    spectra = tiny_calc.to_spectra()
+    data = spectra.get_orbital_rearrangement(
+        energy_window=None, min_overlap=0.0)
+
+    assert len(data["channels"]) == 2
+    for channel in data["channels"]:
+        matches = channel["all_matches"]
+        assert len(np.unique(matches["gs_index"])) == len(matches["gs_index"])
+        assert len(np.unique(matches["fch_index"])) == len(matches["fch_index"])
+    assert data["channels"][spectra.channel]["core_fch"] == (
+        spectra._fch_core_hole_index())
 
 
 def test_load_skips_incomplete_excitation_groups(tiny_calc, tmp_path):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.calculators.pyscf import PySCFMBXAS
 
-    path = tiny_calc.save_object(oname="broken.h5", save_path=str(tmp_path))
+    path = tiny_calc.save(tmp_path / "broken.h5")
     with h5py.File(path, "r+") as f:
         del f["excitations/000"].attrs["complete"]
 
-    back = PySCF_mbxas.load(path)
+    back = PySCFMBXAS.load(path)
     assert back.excitations == []
 
 
 def test_force_ground_state_rerun_is_refused_after_load(tiny_calc, tmp_path):
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.calculators.pyscf import PySCFMBXAS
 
-    path = tiny_calc.save_object(oname="refuse.h5", save_path=str(tmp_path))
-    back = PySCF_mbxas.load(path)
+    path = tiny_calc.save(tmp_path / "refuse.h5")
+    back = PySCFMBXAS.load(path)
 
     with pytest.raises(RuntimeError, match="excitations"):
         back.run_ground_state(force=True)
 
 
-def test_pkl_file_keyword_is_gone():
+def test_flat_constructor_keywords_are_gone():
     import inspect
-    from pymbxas.calculators.pyscf import PySCF_mbxas
+    from pymbxas.calculators.pyscf import PySCFMBXAS
 
-    assert "pkl_file" not in inspect.signature(PySCF_mbxas.__init__).parameters
+    assert tuple(inspect.signature(PySCFMBXAS.__init__).parameters) == (
+        "self", "structure", "config", "runtime")
 
 
 def test_dill_is_gone_from_the_package():

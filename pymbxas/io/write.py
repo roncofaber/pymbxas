@@ -7,7 +7,11 @@ Created on Thu Jun 22 12:01:06 2023
 """
 
 import os
+import logging
 import numpy as np
+
+
+module_logger = logging.getLogger(__name__)
 
 #%%
 
@@ -20,10 +24,8 @@ def write_data_to_fchk(mol, mo_coeff=None, mo_occ=None, density=False,
         from mokit.lib.py2fch import py2fch
         from mokit.lib.py2fch_direct import mol2fch
     except ImportError:
-        if logger is None:
-            print("No MOKIT found - fchk file not written!")
-        else:
-            logger.warning("No MOKIT found - fchk file not written!")
+        (logger or module_logger).warning(
+            "MOKIT is unavailable; FCHK file was not written: %s", oname)
         return
         
     
@@ -79,7 +81,9 @@ def write_data_to_fchk(mol, mo_coeff=None, mo_occ=None, density=False,
         mo_energy = np.zeros((2, norbit))
         
     if norbit > mo_coeff[0].shape[1]:
-        print("Cut orbital number cause higher than allowed by IQmol")
+        (logger or module_logger).warning(
+            "Truncating FCHK orbitals from %d to %d for IQmol compatibility",
+            norbit, mo_coeff[0].shape[1])
         
         norbit_max = mo_coeff[0].shape[1]
     else:

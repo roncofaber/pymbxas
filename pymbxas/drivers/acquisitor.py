@@ -10,54 +10,31 @@ import logging
 
 #%%
 
-def pyscf_acquire(structure, to_excite, **kwargs):
+def pyscf_acquire(structure, sites, *, calculation=None, runtime=None,
+                  excitation=None, **excitation_settings):
     """Performs a PySCF calculation and returns a Spectra object.
 
     Args:
         structure: The ASE structure.
-        to_excite: Atom index(es)/symbol(s) to excite.
-        **kwargs: Additional keyword arguments for PySCF_mbxas.
+        sites: Atom index(es)/symbol(s) to excite.
+        calculation: Optional ``CalculationConfig``.
+        runtime: Optional ``RuntimeConfig``.
+        excitation: Optional reusable ``ExcitationConfig``.
+        **excitation_settings: Direct settings accepted by ``excite``.
 
     Returns:
         Spectra object or None if calculation fails.
     """
-    defaults = {
-        "charge": 0,
-        "spin": 0,
-        "basis": "def2-svpd",
-        "xc": "b3lyp",
-        "pbc": None,
-        "solvent": None,
-        "calc_type": "UKS",
-        "do_xch": True,
-        "loc_type": "ibo",
-        "target_dir": None,
-        "xas_verbose": 3,
-        "xas_logfile": "pymbxas.log",
-        "dft_verbose": 4,
-        "dft_logfile": "pyscf.log",
-        "dft_output": False,
-        "print_fchk": False,
-        "save": False,
-        "save_chk": False,
-        "save_name": "pymbxas_obj.h5",
-        "save_path": None,
-        "gpu": False,
-    }
-
     logger = logging.getLogger(__name__)
-    from pymbxas.calculators.pyscf import PySCF_mbxas
-
-    params = defaults.copy()
-    params.update(kwargs) # Update defaults with user-provided kwargs
+    from pymbxas.calculators.pyscf import PySCFMBXAS
 
     formula = structure.get_chemical_formula()
-    logger.info("Starting PySCF calculation for %s (to_excite=%s)", formula, to_excite)
+    logger.info("Starting PySCF calculation for %s (sites=%s)", formula, sites)
 
     try:
-        obj = PySCF_mbxas(structure=structure, **params)
-        obj.kernel(to_excite)
-        logger.info("Calculation succeeded for %s (to_excite=%s)", formula, to_excite)
+        obj = PySCFMBXAS(structure, config=calculation, runtime=runtime)
+        obj.run(sites, config=excitation, **excitation_settings)
+        logger.info("Calculation succeeded for %s (sites=%s)", formula, sites)
         return obj.to_spectra()
     except Exception:
         logger.exception("PySCF calculation failed for %s (to_excite=%s)", formula, to_excite)

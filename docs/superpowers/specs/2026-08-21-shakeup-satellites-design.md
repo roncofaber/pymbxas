@@ -1,5 +1,10 @@
 # Shake-up satellite spectra
 
+> **Historical design record.** The implementation and the 2026-08-25
+> scientific review supersede several claims here. In particular, the current
+> overlap-kernel convolution is not the explicit higher-order `f^(n)` XAS
+> amplitude. See `dev/shakeup.md` for authoritative behavior.
+
 ## Problem
 
 pymbxas's determinant amplitude (`run_MBXAS_pyscf`, `mbxas.py`) keeps only the
@@ -97,7 +102,7 @@ tolerance is trusted as more than a heuristic.
 **`Spectra` becomes self-sufficient and becomes the single implementation.**
 Today, `get_mbxas_spectra` exists on three places (`PySCF_mbxas`, `Spectra`,
 and the free function in `mbxas/broaden.py`) that must be kept numerically
-identical by hand (`dev/method.md`, `CLAUDE.md` gotchas). Adding a fourth
+identical by hand (`dev/method.md`, `AGENTS.md` gotchas). Adding a fourth
 piece of logic (shake-up) into that pattern makes it worse. Instead:
 
 - `Spectra` gains new stored fields at construction (from data
@@ -181,7 +186,7 @@ than bolted on here.
 ## Testing
 
 Extends `tests/test_h2o_kedge.py` (per the existing "one calculation, add
-assertions, no new test files" scope rule in `CLAUDE.md`):
+assertions, no new test files" scope rule in `AGENTS.md`):
 
 - `shakeup_order=None` produces output identical to the pre-existing
   `get_mbxas_spectra` call already in the test (regression guard).

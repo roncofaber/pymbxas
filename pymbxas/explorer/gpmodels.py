@@ -6,6 +6,8 @@ Created on Tue Apr 15 10:58:36 2025
 @author: roncofaber
 """
 
+import logging
+
 import gpflow
 import numpy as np
 import gpytorch
@@ -17,6 +19,8 @@ from gpytorch.constraints.constraints import Interval
 
 import tensorflow_probability as tfp
 import tensorflow as tf
+
+logger = logging.getLogger(__name__)
 #%%
 
 class BaseGPmodel(object):
@@ -181,9 +185,15 @@ class MTGPyTorch_model(BaseGPmodel):
             loss.backward()
             optimizer.step()
             
-            # Print loss
-            print('Iter %d/%d - Loss: %.3f' % (ii + 1, niter, loss.item()))
+            logger.debug(
+                "GP training iteration %d/%d; loss=%.6g",
+                ii + 1, niter, loss.item())
             self._loss.append(loss.item())
+
+        if niter:
+            logger.info(
+                "GP training completed\n\titerations : %d\n\tfinal loss : %.6g",
+                niter, self._loss[-1])
 
         return
     

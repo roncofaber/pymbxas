@@ -17,6 +17,7 @@ from ase.io import read
 
 # my stuff
 from pymbxas.drivers.acquisitor import pyscf_acquire
+from pymbxas.config import CalculationConfig, ExcitationConfig, RuntimeConfig
 
 
 #%%
@@ -36,17 +37,29 @@ def main():
         help="Path to save the spectrum (default: spectrum.h5)"
     )
     parser.add_argument(
-        "-e", "--to_excite", required=True,
+        "-e", "--sites", required=True,
         help="Atom index(es)/symbol(s) to excite (required)"
     )
     parser.add_argument(
-        "-k", "--kernel_kwargs", type=str, default="{}",
-        help="JSON string of kwargs for pyscf_acquire"
+        "--calculation-config", type=str, default="{}",
+        help="JSON object defining the ground-state calculation"
+    )
+    parser.add_argument(
+        "--runtime-config", type=str, default="{}",
+        help="JSON object defining device, logging, and checkpoint behavior"
+    )
+    parser.add_argument(
+        "--excitation-config", type=str, default="{}",
+        help="JSON object defining FCH/XCH and occupation tracking"
     )
     args = parser.parse_args()
 
     try:
-        kernel_kwargs = json.loads(args.kernel_kwargs)
+        calculation = CalculationConfig.from_dict(
+            json.loads(args.calculation_config))
+        runtime = RuntimeConfig.from_dict(json.loads(args.runtime_config))
+        excitation = ExcitationConfig.from_dict(
+            json.loads(args.excitation_config))
     except json.JSONDecodeError as e:
         print(f"Error decoding JSON: {e}", file=sys.stderr)
         return 1  # Indicate an error
@@ -54,7 +67,8 @@ def main():
     try:
         atoms = read(args.input_file)
         spectra = pyscf_acquire(
-            atoms, to_excite=args.to_excite, **kernel_kwargs
+            atoms, sites=args.sites, calculation=calculation,
+            runtime=runtime, excitation=excitation,
         )
 
         if spectra is None:

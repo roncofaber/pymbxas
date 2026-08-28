@@ -1,140 +1,344 @@
 # Method reference
 
-The physics PyMBXAS implements, the conventions the code relies on, and what is approximated. Fast-reference summary in `CLAUDE.md`; this file is the authority.
+The physics PyMBXAS implements, the conventions the code relies on, and what
+is approximated. The fast-reference summary is in `AGENTS.md`; this file is
+the authority for the established MBXAS path. The optional shake-up paths are
+specified separately in `dev/shakeup.md`.
 
 ## What MBXAS computes
 
-X-ray absorption from a core level is not a one-electron transition. Removing a core electron changes the potential every remaining electron sees, so the final state is not a single Slater determinant built from ground-state orbitals. The valence electrons relax, and that relaxation redistributes spectral weight from the main line into shake-up satellites and suppresses the total.
+X-ray absorption from a core level is not a one-electron transition. Removing
+a core electron changes the potential seen by every remaining electron, so
+the final state is not a single Slater determinant built from ground-state
+orbitals. Valence relaxation redistributes spectral weight and suppresses the
+main line.
 
-The determinant approach of Liang and Prendergast treats this by computing the many-body overlap between the ground-state determinant and each core-excited final-state determinant explicitly, keeping the one-body (single shake-up) term. PyMBXAS implements that for molecules with PySCF providing the two ΔSCF calculations.
+The determinant approach of Liang and Prendergast evaluates the many-body
+overlap between the ground-state determinant and core-excited final-state
+determinants. PyMBXAS implements the one-body core-hole-basis amplitude for
+molecules, with PySCF supplying the Delta-SCF states. Experimental
+overlap-kernel satellites can be added during post-processing, but they are not
+the explicit higher-order transition amplitudes of the full `f^(n)` series.
 
 ## Workflow
 
-Three SCF calculations per excited atom, all unrestricted.
+Three SCF calculations are available per excited atom, all unrestricted.
 
 | Step | Charge | Spin | Occupation | Purpose |
 |---|---|---|---|---|
-| **GS** | `q` | `s` | aufbau | Reference determinant. Run once, shared by all excitations. |
-| **FCH** | `q + 1` | `s ± 1` | core orbital of the excited channel emptied, MOM-constrained | Full core hole. Supplies the final-state orbitals, eigenvalues and transition dipoles. |
-| **XCH** | `q` | `s` | FCH occupation plus one electron in the FCH LUMO, MOM-constrained | Excited core hole. Supplies the absolute energy alignment only. |
+| **GS** | `q` | `s` | aufbau | Reference determinant, shared by all excitations. |
+| **FCH** | `q + 1` | `s +/- 1` | excited-channel core orbital emptied; MOM, maxvol, or mixed constrained | Supplies final-state orbitals, eigenvalues, and dipoles. |
+| **XCH** | `q` | `s` | FCH occupation plus one electron in its lowest-energy ordinary virtual; same constraint as FCH | Supplies absolute energy alignment only. |
 
-Sign convention for the FCH spin: `spin_FCH = spin_GS + 2*channel - 1`. For the default `channel=1` (beta) this is `spin + 1`, since removing a beta electron raises `n_alpha - n_beta`. For `channel=0` it is `spin - 1`, which PySCF accepts as a negative `mol.spin`.
+The ordinary virtual excludes the core hole, which is identified by maximum
+overlap with the selected GS core orbital. This matters for MOM solutions:
+occupation zeros need not be Aufbau ordered, and the orbital whose numerical
+index equals the electron count may already be occupied. After XCH convergence,
+PyMBXAS verifies the electron counts and checks that both the core hole and the
+added-electron orbital survived the optimization. `occupation="maxvol"` is
+the production default and enables fixed-reference, degree-one determinant
+tracking from the first occupation call. `"mom"` and `"mixed"` remain useful
+for controlled state comparisons; mixed applies MOM for
+`mom_warmup_calls` occupation calls before the same fixed-reference maxvol
+selection. Every excitation persists its complete configuration, including
+state-specific SCF overrides.
 
-The core hole is localized on one atom. When the excited element has several symmetry-equivalent 1s orbitals they come out of the SCF delocalized over all of them, and a determinant built from those is meaningless. `_run_localization` detects this and runs IBO (default) or Boys over the core manifold before any excitation, replacing `gs_data.mo_coeff`. Verified on C2H2: the two carbons then give spectra agreeing to 4e-8 eV in energy and 8e-14 in intensity.
+FCH and XCH use a bounded adaptive SCF sequence. Ordinary DIIS receives the
+first cycle budget. If it fails, a second DIIS attempt starts from the
+lowest-gradient orbitals observed, delays DIIS for two damped iterations, and
+applies a virtual level shift. Both stages continue to invoke the configured
+occupation controller. A remaining failure is reported rather than handed to
+second-order SCF: Newton orbital rotations hold a numerical occupation array
+fixed but do not reapply MOM/maxvol, and can therefore leave the intended
+diabatic state. `SCFConfig(second_order=True)` is an explicit diagnostic override,
+not the production default.
 
-## Determinant amplitude
+After FCH convergence, PyMBXAS measures `<S^2>` against the ideal value for
+the requested spin and compares the complete occupied subspace with the
+GS-derived target using its determinant overlap and minimum singular value.
+These checks complement the core-hole overlap, which alone cannot detect a
+rearrangement elsewhere in the determinant.
 
-Let `h` be the core-hole orbital, `i, j` the occupied FCH orbitals of the excited channel, `f` the unoccupied ones, and `n` the ground-state occupied orbitals of that channel with the excited core orbital removed.
+### SCF reference policies
 
-The many-body overlap matrix between the two SCF solutions is
+The three available controllers express two implemented reference policies:
 
+- **MOM** ranks individual current orbitals by their projection onto the fixed
+  target orbitals.
+- **Maxvol** selects the current occupied subspace collectively by maximizing
+  its determinant overlap with that fixed target.
+- **Mixed** changes the selection rule, not the reference: it starts with MOM,
+  then maxvol tracks the occupied subspace collectively against the original
+  fixed target. It is an optional diagnostic controller, not a preferred
+  warm-up stage.
+
+For FCH, the fixed target is the localized GS orbital set with the selected
+core occupation removed. It therefore means "remain connected to this
+specific GS core excitation." For XCH, the target is the converged FCH orbital
+set with one electron placed in the selected spectator orbital. This includes
+the spectator explicitly; the unmodified GS occupied space is not a complete
+XCH reference.
+
+The Prendergast QE implementation can instead freeze an intermediate SCF
+snapshot and later track that snapshot, optionally multiplying its maxvol
+criterion by one against the original reference. A snapshot supplies local
+SCF continuity, while the original reference supplies the identity of the
+requested excitation. QE's core-hole pseudopotential makes its early snapshot
+safer than it is in an all-electron calculation. Here, freezing after one MOM
+call converged an early low-cost 6fda O-site test to a state about 2.2 eV above
+the MOM state, and the literal dual-reference handoff failed within 100 cycles.
+Consequently, snapshot-only and dual-reference policies are documented but not
+exposed.
+
+A corrected PBE/def2-SVPD O8 comparison on the production geometry found two
+stationary FCH branches. MOM and mixed followed by second-order SCF converged
+to the same lower-energy state (`<S^2>` about 1.060), while direct maxvol
+converged in 21 DIIS cycles to a state 0.261 eV higher with `<S^2>` 0.801 and a
+larger target determinant overlap (0.767 versus 0.676). Newton rotations did
+not reapply either occupation selector and therefore defeated the intended
+diabatic tracking. The 6fda workflow consequently defaults to direct maxvol
+and disables second-order recovery.
+
+After each maxvol or mixed SCF, the high-level log reports aggregate selector
+wall time, internal row swaps, calls with occupation changes, total selected
+orbital changes, and the last changing maxvol call. Internal swaps measure work
+needed to improve the current MOM-ranked seed. Occupation changes instead
+measure evolution of the SCF eigenvectors and can remain nonzero even when the
+current seed already satisfies maxvol. The latter is the relevant warning sign
+for an oscillating constrained SCF. Per-call, per-spin details and mixed MOM
+warm-up calls are retained in raw PySCF output only at debug verbosity;
+maxvol call numbering begins at the mixed handoff.
+
+The FCH spin is `spin_GS + 2*channel - 1`. For the default `channel=1`
+(beta), removing a beta electron raises `n_alpha - n_beta` and gives
+`spin + 1`. For `channel=0`, PySCF accepts the resulting `spin - 1`, including
+negative spin.
+
+When the excited element has several symmetry-equivalent 1s orbitals, the GS
+core manifold is localized with IBO (default) or Boys before any excitation.
+`gs_data.mo_coeff` is replaced by the localized coefficients and the original
+coefficients are retained as `mo_coeff_del`. A determinant built from an
+unlocalized degenerate core manifold is not atom specific.
+
+## One-body determinant amplitude
+
+Let `h` be the FCH core-hole orbital, `i` the occupied FCH valence orbitals,
+`f` the FCH virtual orbitals excluding the core hole, and `n` the occupied GS
+orbitals after removing the excited core orbital.
+
+```text
+S_MB = C_FCH^T S_AO C_GS
+A    = S_MB[occ_FCH, occ_GS]
+A'   = S_MB[virt_FCH, occ_GS]
+K    = A' A^-1
 ```
-S_MB = C_FCH^T · S_AO · C_GS
+
+For Cartesian component `x`, the implemented amplitude is
+
+```text
+M_xf = det(A) [ <f|x|h> - sum_i K[f,i] <i|x|h> ].
 ```
 
-from which two blocks are taken:
+This is Eq. 22 of Roychoudhury and Prendergast, PRB 107, 035146, in the
+core-hole basis. Both orbitals in every dipole integral come from the same FCH
+calculation, so their orthogonality makes the transition dipole origin
+independent.
 
-```
-A      = S_MB[occ_FCH, occ_GS]     square, (N-1) x (N-1)
-A'     = S_MB[uno_FCH, occ_GS]     (n_virt) x (N-1)
-K      = A' A^-1
-```
+FCH virtual eigenvalues are rigidly aligned when XCH is enabled:
 
-The transition amplitude to the final state with the electron in `f` is
-
-```
-amp[x, f] = det(A) * ( <f|x|h>  -  sum_i K[f, i] <i|x|h> )
+```text
+E[f] = eps_FCH[f] + (E_XCH - E_GS) - min(eps_FCH[virtual]).
 ```
 
-for each Cartesian component `x`. The first term is the bare one-electron transition; the second subtracts the part already accounted for by relaxation of the occupied manifold; `det(A)` is the orthogonality-catastrophe suppression of the whole spectrum.
-
-Excitation energies are the FCH eigenvalues of the virtual manifold, shifted:
-
-```
-E[f] = eps_FCH[f] + (E_XCH - E_GS) - min(eps_FCH[virt])
-```
-
-so the lowest transition lands exactly at the XCH total-energy difference and the rest follow the FCH eigenvalue spacing.
+The lowest returned transition therefore sits exactly at `E_XCH - E_GS`.
 
 ## Index conventions
 
-These are the easiest thing in the package to get subtly wrong.
-
-- `exc_orb_idx = np.where(mo_occ[channel] == 0)[0][0]` is the core hole. It is the *lowest-energy unoccupied* MO, which is index 0 only when the excited atom is the heaviest present. For the C K-edge of CO the O 1s is occupied at index 0 and the hole sits at index 1. Verified.
-- `uno_idxs_fch = np.where(mo_occ[channel] == 0)[0][1:]` is the virtual manifold. The `[1:]` drops the hole, which is not a valid final state for its own transition.
-- `occ_idxs_gs` removes the excited core orbital from the ground-state occupied set **by MO index**, via `np.setdiff1d`. Using `np.delete` treats the argument as a position in the occupied list, which coincides with the MO index only for a strictly aufbau ground state.
-- `A` must come out square. `n_occ_FCH == n_occ_GS - 1` is what guarantees that; if `A` is rectangular something upstream mis-identified the core orbital.
-- `find_1s_orbitals_pyscf` returns global MO indices. Anything that enumerates the occupied subset must map back through `occ_idxs` before indexing `mo_energy`.
+- `channel=0` is alpha and `channel=1` is beta. Every downstream orbital
+  array must be indexed with the requested channel.
+- The FCH core hole is the unoccupied FCH MO with the largest absolute overlap
+  with the selected GS core orbital. It is not inferred from the position of
+  an occupation zero.
+- The excited-channel virtual manifold contains every zero-occupation FCH MO
+  except that overlap-identified core hole.
+- The excited GS core orbital is removed by MO number with `np.setdiff1d`, not
+  by position with `np.delete`.
+- `A` must be square: `n_occ_FCH == n_occ_GS - 1` in the excited channel.
+- `find_1s_orbitals_pyscf` returns global MO indices. Occupied-subset loops
+  must map through their MO-index arrays before reading orbital energies.
+- Unrestricted occupations are `1.0` or `0.0`; comparisons against `== 1`
+  are intentional and incompatible with a restricted `2.0/0.0` path.
 
 ## Units and array shapes
 
 | Quantity | Unit | Shape |
 |---|---|---|
 | `mbxas["energies"]` | Hartree | `(n_transitions,)` |
-| `mbxas["absorption"]` | atomic units, **amplitude** | `(3, n_transitions)` |
-| `mbxas["mb_overlap"]` | dimensionless | `(2, n_orb, n_orb)`, both spin channels |
+| `mbxas["absorption"]` | atomic units, amplitude | `(3, n_transitions)` |
+| `mbxas["mb_overlap"]` | dimensionless | `(2, n_orb, n_orb)` |
 | `mbxas["dipole_KS"]` | atomic units | `(2, 3, n_orb, n_orb)` |
-| `Spectra.energies`, `get_mbxas_spectra` output | eV | - |
+| `Spectra.energies`, spectrum energy grids | eV | one-dimensional |
 
-Intensity is `energy * amplitude**2`, the photon-energy-weighted absorption cross section `sigma(omega) ~ omega * |M|^2` (Eq. 4 and Eq. 27, Roychoudhury & Prendergast, PRB 107, 035146). `energy` is the transition energy in Hartree, matching the atomic-unit amplitude; `Spectra.amp2int` and `PySCF_mbxas.get_mbxas_spectra` both apply it at the same point (converting amplitude to intensity), never inside `mbxas["absorption"]` itself. The isotropic spectrum is the **mean** over the three Cartesian components before the energy weighting, `energy * sum(amp**2, axis=0) / 3`, matching an orientation average of `|e·d|^2`. Summing instead of averaging inflates every spectrum by exactly 3.
+The photon-energy-weighted intensity is
+
+```text
+I_f = E_f * mean_x(|M_xf|^2),
+```
+
+with `E_f` in Hartree at the point of multiplication. The Cartesian mean is
+the isotropic orientation average; using a sum would inflate every spectrum by
+three. `Spectra.amp2int` is the implementation, and calculator-level spectrum
+generation delegates to `Spectra`.
+For spectator-assisted terms, `E_f` is the complete energy after adding the
+spectator excitation. The same final energy therefore controls both the peak
+position and the photon-energy prefactor.
+
+## Optional order-resolved many-body spectra
+
+`f_order` directly selects the highest cumulative many-body order: 1 returns
+f1, 2 returns f1+f2, and 3 returns f1+f2+f3. The spectator channel follows
+that order automatically: f1=`10`, f2=`20+11`, and f3=`30+21+12`. Spin
+channels are combined by adding energies and multiplying intensities, with
+their determinant normalization retained; final sticks are broadened once.
+`spectator_order` and `max_total_order` are diagnostic overrides rather than
+normal physical controls.
+
+The formulas match `mbxas-qe`, including constituent-level shake-down flags.
+Physical spectra include both flagged and unflagged configurations;
+`get_mbxas_decomposition()` returns their per-order decomposition, while
+`print_mbxas_summary()` reports its integrated values.
+Production f2 also uses QE's energy-windowed, count-adaptive `K`-element
+screening and convergence test. Excited-channel MB3 and spectator doubles use
+QE's corresponding adaptive product-threshold searches. PyMBXAS nevertheless
+has a finite molecular Gaussian virtual manifold and no k points or plane-wave
+band machinery. Diagnostic overlap distributions and orders above MB3 remain
+exact and combinatorial, so an explicit small order is required.
+
+See `dev/shakeup.md` for formulas, exact control flow, validation status, and
+the QE comparison.
+
+### Orbital rearrangement diagrams
+
+The GS-to-FCH diagram is a wavefunction diagnostic, not another MBXAS
+approximation. Rows of `mb_overlap` are final FCH orbitals and columns are GS
+orbitals. PyMBXAS maximizes the total squared overlap with a Hungarian
+one-to-one assignment. This prevents several GS orbitals from being assigned
+to the same FCH orbital, which independent maximum-overlap choices can do.
+
+MOM and maxvol determine which occupied subspace is followed during SCF; they
+do not define a unique final orbital-by-orbital history. Rotations within
+degenerate or strongly mixed subspaces are physically equivalent, so weak or
+competing connectors indicate ambiguity rather than literal electron paths.
+Connector opacity reports squared-overlap confidence. The default view uses
+the global GS HOMO as a common zero, retaining real GS/FCH shifts. FCH HOMO and
+LUMO are derived from actual occupations, so the lowest FCH unoccupied orbital
+can correctly be the deep core hole in a non-Aufbau state.
 
 ## Known approximations
 
-Ordered by how much they matter.
+Ordered roughly by their effect on interpretation.
 
-**Spectator-spin determinant is omitted.** The full many-body overlap is the product over both spin channels, `det(A_alpha) * det(A_beta)`. The code computes `mb_overlap` for both channels but only the excited one enters the amplitude. The non-excited channel also relaxes in the core-hole field, and its determinant is a constant multiplicative factor on every transition. For H2O/O it is 0.916, so absolute intensities are high by `1/0.916^2 = 1.19`. **Spectrum shapes are unaffected**, which is why this has never shown up in a comparison. Applying it would change the absolute intensity of every previously computed result, so it is documented rather than fixed. If you do apply it, it needs a `### Changed` changelog entry. This is also the convention in the reference papers themselves (e.g. the CrO2 majority/minority spin spectra in PRB 106, 075133 Fig. 4 are reported as separate curves, never multiplied) and in the production QE implementation at [`mbxas-qe`](https://gitlab.com/mbxas/mbxas-qe) — but that codebase goes further: `spec.f90`'s `spin_convolve_spectrum` (called from `mbxas_spectra.f90` on the `noci-kpoint-shirley*` branches) energy-convolves each spin channel's own order-resolved shake-up spectrum with the *other* channel's relaxation-overlap spectrum, so the spectator channel contributes genuine satellite structure, not just a constant scale factor. PyMBXAS implements this: `spectator_order` on `get_mbxas_spectra`/`get_shakeup_spectrum`/`get_shakeup_summary` combines the excited channel's own shake-up (built from `mbxas.mbxas.occ_unocc_indices`) with the spectator channel's own shake-up (built from the equivalent `mbxas.mbxas.spectator_occ_unocc_indices`, which has no core orbital to remove or core-hole index to drop) via `mbxas.shakeup.combine_cross_channel_sticks` -- the outer sum of electron-hole energies and outer product of weights for every `(i, j)` order pair under a `max_total_order` cap, the discrete-stick form of convolving two independent probability spectra. See "One-body truncation" below.
+**Order truncation.** The default MBXAS spectrum contains spin-complete f1.
+The optional path adds explicit determinant amplitudes only through the
+requested order; omitted higher orders remain an approximation.
 
-**One-body truncation, with an opt-in order-2 correction.** By default (`shakeup_order=None`) only single shake-up is kept. `get_mbxas_spectra(shakeup_order=1|2|"auto")` (`Spectra`, and `PySCF_mbxas` which delegates to it) additionally convolves in the order-k valence shake-up probability spectrum: a k-fold simultaneous valence-to-conduction excitation, weighted by `|det(K[c_combo, v_combo])|^2` (`K` has shape `(n_unocc, n_occ)`: rows are conduction indices, columns are valence indices), the k x k minor of the same `K = A' @ inv(A)` matrix already used for the n=1 amplitude (`pymbxas/mbxas/shakeup.py`, `mbxas.mbxas.build_A_K` returns `AMat, ADet, KMat, APrimeMat`; occupied/unoccupied index bookkeeping shared with `run_MBXAS_pyscf` via `mbxas.mbxas.occ_unocc_indices`). This is the exact non-interacting generalization of the `f^(n)` term (PRB 107, 035146, Eq. 32-35), matching `mbxas-qe`'s `singles_overlap`/`doubles_overlap` formula exactly (verified against `K(v,c)*K(vp,cp) - K(v,cp)*K(vp,c)` in `QE/SHIRLEY/src/mbxas_spectra.f90`, modulo pymbxas's transposed `K` axis convention). `shakeup_sticks_by_order`'s `"auto"` mode includes order 1 plus every order the maxvol-based configuration search (`mbxas.shakeup._maxvol_shakeup_configs`, ported from `mbxas-qe`'s `maxvol_multi_mod.f90`) finds whose mass clears `tol` relative to the order-1 mass; there is no hardcoded order cap. The search reuses the existing `K`-minor weight formula unchanged (Jacobi's complementary-minor identity: for any k-swap configuration, `det(A_swapped) / det(A_reference) = det(K[rows_in, cols_out])`, so the weight formula generalizes to any order with no new physics) -- what changed is *which* k-tuples get evaluated. Instead of ranking every valence->conduction single by `|K|^2` and brute-force-forming 2x2 minors within an active prefix (pymbxas's previous approach, and no longer present), the search runs a maxvol-style swap search directly on `AMat`/`APrimeMat` (`mbxas.mbxas.build_A_K`): seeded from the top-ranked order-1 singles, it uses a Sherman-Morrison-updated pivot inverse (`mbxas.maxvol.sherman_morrison_row_update`) to find each seed's best next swap, extending breadth-first order by order until a new order's captured mass drops below `tol * mass1`. This mirrors `mbxas-qe`'s own algorithm rather than a magnitude-of-singles heuristic, and removes the order-2 cap: order 3+ configurations are found whenever their mass is non-negligible, at no extra implementation cost. SCF/MOM and `AMat`/`ADet`/`KMat` construction are untouched by this -- the search only ever runs on the frozen, already-converged FCH orbitals; see `docs/superpowers/specs/2026-08-24-maxvol-shakeup-search-design.md` for the full design and the reasoning against overriding `occ_idxs_fch` from a post-hoc overlap search. Cross-channel combination (`combine_cross_channel_sticks`) has the same problem one level up -- an outer join between two channels' order-1 stick lists is already `n_occ * n_virt` large on each side, so a plain outer product explodes even though each channel's own combinatorics are pruned -- and is pruned the same way per `(i, j)` order pair: sort each side by weight descending, grow active prefixes geometrically, and stop once the join restricted to those prefixes has captured `(1 - tol)` of the block's exact total mass `sum(w_i) * sum(w_j)` (known in closed form here, unlike the order-2 case, since the two lists are independent). Cross-spin convolution (the *other*, non-excited channel's own shake-up, via `spin_convolve_spectrum` in `mbxas-qe`'s `spec.f90`) is implemented as `spectator_order`/`max_total_order` on `get_mbxas_spectra`/`get_shakeup_spectrum`/`get_shakeup_summary`; `spectator_order=None` (the default) reproduces the pre-cross-spin behavior exactly. `shakedown_only` isolates combinations with negative electron-hole energy ("shake-down", `mbxas-qe`'s `kpoint_spectral_details.f90` naming); `get_shakeup_summary` always reports the corresponding `shakedown_fraction` and warns above `tol`. The spectator channel has no core hole to prune its virtual manifold, so its combinations can reach delta_e in the hundreds of eV (high-lying diffuse virtuals); `convolve_shakeup` (`pymbxas/mbxas/shakeup.py`) drops any stick beyond the main spectrum's own span plus a broadening margin before sizing its convolution kernel, since such a stick shifts the whole spectrum off the plotted window and cannot contribute above Gaussian-tail precision -- without this bound the kernel grid would blow up for a system with a handful of orbitals. For a real many-orbital molecule, order-2 cross-channel combinations alone can still reach millions of sticks within that bound, at which point a dense `(n_kgrid, n_sticks)` broadcast is tens to hundreds of GB regardless of grid extent; `mbxas.broaden.broadened_spectrum` avoids this on a uniform grid by truncating each stick's Gaussian to a fixed-width window of `nsigma=6` sigma (matching `mbxas-qe`'s `spec.f90`'s `stick_to_spec`) and scatter-adding it with `np.bincount`, so cost scales with `n_sticks * window_width` instead of `n_sticks * n_kgrid`; it falls back to the dense form only for the rare non-uniform-grid caller (the main, non-shake-up spectrum). `Spectra.get_shakeup_summary(order=2, ...)` bundles the bare spectrum, each intermediate shake-up order, and the probability curve into one call, matching what `get_mbxas_spectra`/`get_shakeup_spectrum` already compute -- data only. `pymbxas.plotting.plot_shakeup_summary(summary)` (optional `pymbxas[plot]` extra, matplotlib) renders that dict directly. See `docs/superpowers/specs/2026-08-21-shakeup-satellites-design.md` for the full design, including the still-unverified Onishi/Fredholm-determinant-type normalization identity that would make "auto" convergence rigorous rather than heuristic.
+**Spectator-spin truncation.** The default f1 includes the full
+`det(A_alpha) * det(A_beta)` factor. At higher requested order, spectator
+overlap terms are included through the same total-order cap. Explicitly
+passing `spectator_order=None` is a single-channel diagnostic and is not the
+physical default.
 
-**No self-interaction correction.** pymbxas runs plain LDA/B3LYP ΔSCF; core-hole self-interaction error is fully present and uncorrected. `mbxas-qe`'s `sic-functional-dev` / `density-matrix-sic` / `sic-projector-augmentation` / `integration/pSIC-core` branches implement a state-dependent SVD-SIC potential (MaxVol-projector-based, split into occupied-removal and virtual-addition channels) to correct this for strongly-correlated and narrow-gap systems. See `SVD_SIC_METHODOLOGY_GUIDE.md` on those branches. Not implemented here; porting it to a molecular ΔSCF/PySCF context would be a substantial project of its own.
+**Selectable fixed SCF reference.** Production FCH and XCH calculations use
+the same selected controller: PySCF MOM by default or fixed-reference maxvol
+when requested. PyMBXAS builds the spectral occupied reference directly from
+the resulting converged occupations. QE additionally
+supports evolving SCF references and post-SCF reference reselection with an
+`eshift_swap` correction. Those integration changes remain deferred in
+`dev/shakeup.md`.
 
-**Final states are the FCH virtual manifold.** Their number and quality are set entirely by the basis. Diffuse functions (`def2-svpd` rather than `def2-svp`) matter for near-edge structure; the discrete pseudo-continuum above the edge is a basis artifact and should not be read as physical.
+**No self-interaction correction.** PyMBXAS runs ordinary LDA, hybrid DFT, or
+HF Delta-SCF. The state-dependent SIC developments on `mbxas-qe` branches are
+not implemented here.
 
-**XCH alignment is a single rigid shift.** It fixes the lowest transition to `E_XCH - E_GS` and assumes the FCH eigenvalue spacing is right above it. The absolute edge position inherits the functional's error: LDA/def2-SVPD puts the H2O oxygen edge at 529.1 eV against 534.5 eV measured.
+**Finite FCH virtual manifold.** Final states are determined by the molecular
+basis. Diffuse functions matter near the edge, and the discrete high-energy
+pseudo-continuum is a basis artifact.
 
-**Broadening is a normalized Gaussian.** `gaussian_broadening` includes the `1/(σ√2π)` factor, so the kernel integrates to 1 and the integrated area of a broadened spectrum equals the sum of the transition intensities regardless of `sigma`. Spectra broadened with different `sigma` are therefore directly comparable. This was not true previously: the kernel was unnormalized, and absolute y-values were larger by a factor `σ√2π`.
+**Rigid XCH alignment.** XCH fixes only the lowest transition. All higher
+spacing comes from FCH eigenvalues and inherits the functional and basis error.
 
-**K-edge, all-electron only.** The 1s AO label is matched literally, so ECP bases and L-edges find no core orbital.
+**Normalized Gaussian broadening.** The Gaussian includes
+`1/(sigma*sqrt(2*pi))`, so its area is one and ordinary broadened-spectrum area
+does not depend on `sigma`.
+For spin-complete many-body spectra, PyMBXAS combines discrete spin-channel
+sticks before applying this final-state broadening once. QE broadens both
+factors before convolution, so equivalent Gaussian widths require
+`sigma_PyMBXAS = sqrt(2) * sigma_QE`; see `dev/shakeup.md`.
 
-**Two hand-tuned thresholds** in `find_1s_orbitals_pyscf`, neither validated: `0.3 * max(coeff^2)` decides whether an orbital has weight on the target atom, and `1e-1` Hartree (2.7 eV) decides whether two core orbitals are degenerate enough to localize together. The degeneracy window is wide; chemically inequivalent cores within 2.7 eV are localized as one manifold, which is usually what you want but is not what the number says.
+**K-edge, all-electron only.** Core identification matches the `1s` AO label
+literally. ECP bases and L-edges are unsupported.
 
-**No periodic boundary conditions.** `int1e_r` is not periodic. A lattice sum of it returns finite numbers that are not transition dipoles, so `pbc=True` raises rather than producing them. A periodic implementation needs the velocity gauge (`int1e_ipovlp`) throughout.
+**Hand-tuned core thresholds.** `find_1s_orbitals_pyscf` uses
+`0.3 * max(coeff^2)` for atomic character and `0.1` Hartree for core
+degeneracy. Neither threshold has a systematic validation study.
+
+**No periodic boundary conditions.** The molecular position operator
+`int1e_r` is not periodic. `pbc=True` raises; a periodic implementation needs
+a consistent velocity-gauge formulation.
 
 ## Failure modes
 
-The ΔSCF core-hole steps fail in ways that do not raise on their own.
-
-- **Variational collapse.** MOM is a maximum-overlap constraint, not a projection. The FCH can relax back to the ground state and report `converged = True`. Detect it by projecting the converged hole orbital onto the ground-state core orbital; healthy is above roughly 0.99. For H2O/O the overlap is 0.99993 and the hole is 99.2% O 1s by Mulliken weight.
-- **Non-convergence.** A non-converged FCH still has `mo_coeff` and still produces a spectrum.
-- **Ill-conditioned `A`.** A near-singular `A` makes `K = A' A^-1` blow up. Healthy is `det(A)` around 0.9 and `cond(A)` near 1; H2O/O gives 0.9486 and 1.016. A `det(A)` far below 0.5 means the two SCF solutions describe different states.
-- **Delocalized cores.** If localization did not run or did not separate the core orbitals, `find_1s_orbitals_pyscf` returns more than one index for a single atom and the excitation is aborted rather than guessed at.
+- **Variational collapse:** either occupation constraint can converge to the wrong state. Check SCF
+  convergence, electron counts, overlap of the converged hole with the target
+  core orbital, and overlap of the XCH electron with its intended FCH virtual.
+- **Non-convergence:** unconverged SCF objects still contain plausible-looking
+  orbitals; PyMBXAS rejects them.
+- **Ill-conditioned `A`:** `K=A'A^-1` becomes unstable. H2O/O has
+  `det(A) ~= 0.9486` and `cond(A) ~= 1.016`; a much smaller determinant or much
+  larger condition number signals incompatible SCF states.
+- **Delocalized core:** if localization cannot isolate one core orbital for an
+  atom, the excitation is rejected rather than guessed.
+- **Heuristic satellite completeness:** every returned higher-order minor may
+  be correct while important configurations are absent. This affects only the
+  optional path and is detailed in `dev/shakeup.md`.
 
 ## Verification
 
-`tests/test_h2o_kedge.py` runs H2O oxygen K-edge at LDA/def2-SVPD and checks the invariants above. Reference values from that system, which is small enough to reason about:
+`tests/test_h2o_kedge.py` runs the H2O oxygen K-edge at LDA/def2-SVPD and
+checks SCF convergence, core-hole retention, determinant conditioning,
+one-body amplitude reconstruction, XCH alignment, origin independence,
+shake-up plumbing, and default-off behavior.
 
-| Quantity | Value |
+| Quantity | Reference |
 |---|---|
-| `det(A)`, `cond(A)` | 0.9486, 1.016 |
-| Hole orbital character | 99.2% O 1s |
-| Hole overlap with GS core | 0.99993 |
-| `det(A_spectator)`, unused | 0.916 |
-| First transition | 529.136 eV |
-| `E_XCH - E_GS` | 529.136 eV (identical by construction) |
-| FCH ionization potential | 534.47 eV |
+| `det(A)`, `cond(A)` | approximately 0.9486, 1.016 |
+| Hole orbital character | approximately 99.2% O 1s |
+| Hole overlap with GS core | approximately 0.99993 |
+| Spectator `det(A)` | approximately 0.916, omitted from base amplitude |
+| First transition | approximately 529.136 eV |
+| `E_XCH - E_GS` | identical to the first transition by construction |
+| FCH ionization potential | approximately 534.47 eV |
 | Transitions retained | 34 of 39 AOs |
-| Order-1 / order-2 shake-up mass (H2O/O) | see `tests/test_h2o_kedge.py` order-2-mass assertion |
 
-Two independent checks worth re-running by hand after any change to `run_MBXAS_pyscf`:
-
-- Reimplement the amplitude from the stored `gs_data` and `data["fch"]` and compare. Agreement should be at machine precision (1e-16).
-- Translate the molecule by an arbitrary vector and recompute the dipoles. They must not change (1e-15), since both orbitals come from the same FCH calculation and are orthogonal. A nonzero change means orbitals from different SCF runs have leaked into the dipole expression.
+Synthetic tests exhaustively validate overlap completeness and normalization,
+the explicit MB2 and MB3 formulas, and constituent-level shake-down selection.
+The molecular integration test validates the all-electron execution path;
+direct numerical comparison to a matched QE calculation remains future work.
 
 ## References
 
-- Liang, Vinson, Pemmaraju, Drisdell, Shirley, Prendergast, *Accurate x-ray spectral predictions: an advanced self-consistent-field approach inspired by many-body perturbation theory*, [PRL 118, 096402 (2017)](https://doi.org/10.1103/PhysRevLett.118.096402)
-- Roychoudhury, Prendergast, *Efficient core-excited state orbital perspective on calculating x-ray absorption transitions in determinant framework*, [PRB 107, 035146 (2023)](https://doi.org/10.1103/PhysRevB.107.035146) — the core-hole-basis (CHB) reformulation `run_MBXAS_pyscf` implements (Eq. 22), and the source of the `omega` intensity prefactor (Eq. 4)
-- Liang, Prendergast, *Quantum many-body effects in x-ray spectra efficiently computed using a basic graph algorithm*, [PRB 97, 205127 (2018)](https://doi.org/10.1103/PhysRevB.97.205127)
-- Liang, Prendergast, *Taming convergence in the determinant approach for x-ray excitation spectra*, [PRB 100, 075121 (2019)](https://doi.org/10.1103/PhysRevB.100.075121)
-- Reference implementation this package started from: [CleaRIXS](https://github.com/subhayanroychoudhury/CleaRIXS)
-- Active plane-wave/QE implementation of the same MBXAS method (periodic, Shirley optimal basis, SIC, NOCI shake-up satellites, GPU): [`mbxas-qe`](https://gitlab.com/mbxas/mbxas-qe), local checkout at `/home/roncofaber/software/mbxas-qe`. `main` is a stable but older snapshot; the interesting development is on unmerged feature branches (`sic-*`, `noci-kpoint-shirley*`, `l-edges`, `gpu-port-shirley*`). Architecturally too different to share code with pymbxas, but useful for tracking where the method is headed.
+- Liang et al., *Accurate x-ray spectral predictions: an advanced
+  self-consistent-field approach inspired by many-body perturbation theory*,
+  PRL 118, 096402 (2017), https://doi.org/10.1103/PhysRevLett.118.096402
+- Roychoudhury and Prendergast, *Efficient core-excited state orbital
+  perspective on calculating x-ray absorption transitions in determinant
+  framework*, PRB 107, 035146 (2023),
+  https://doi.org/10.1103/PhysRevB.107.035146
+- Liang and Prendergast, *Quantum many-body effects in x-ray spectra
+  efficiently computed using a basic graph algorithm*, PRB 97, 205127 (2018),
+  https://doi.org/10.1103/PhysRevB.97.205127
+- Liang and Prendergast, *Taming convergence in the determinant approach for
+  x-ray excitation spectra*, PRB 100, 075121 (2019),
+  https://doi.org/10.1103/PhysRevB.100.075121
+- Molecular starting point: https://github.com/subhayanroychoudhury/CleaRIXS
+- Periodic reference implementation: https://gitlab.com/mbxas/mbxas-qe

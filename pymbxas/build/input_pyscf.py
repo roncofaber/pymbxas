@@ -6,9 +6,14 @@ Created on Tue Aug  8 17:05:13 2023
 @author: roncoroni
 """
 
+import logging
+
 # pyscf stuff
 from pyscf import scf, dft
 import pyscf.pbc as pypbc
+
+
+logger = logging.getLogger(__name__)
 
 #%%
 
@@ -30,7 +35,8 @@ def make_density_fitter(mol, pbc, cderi=False):
 
 # Function to make a pyscf calculator that both work with PBC and not.
 def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None,
-                          dens_fit=None, calc_name=None, save=False, is_gpu=False):
+                          dens_fit=None, calc_name=None, save=False, is_gpu=False,
+                          max_cycle=100, conv_tol=None, grid_level=None):
 
     # with PBC
     if pbc:
@@ -46,7 +52,7 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
         # generate calculator
         if "HF" in calc_type.upper():
             if xc is not None:
-                print("HF method: XC keyword ignored.")
+                logger.warning("HF calculator ignores the XC setting %r", xc)
             calc = getattr(scf, calc_type)(mol)
         elif "KS" in calc_type.upper():
             if xc is None:
@@ -63,6 +69,12 @@ def make_pyscf_calculator(mol, xc=None, calc_type="UKS", pbc=False, solvent=None
     # Use chkfile to store calculation (if you want)
     if isinstance(calc_name, str) and save:
        calc.chkfile = '{}.chkfile'.format(calc_name)
+
+    calc.max_cycle = int(max_cycle)
+    if conv_tol is not None:
+        calc.conv_tol = float(conv_tol)
+    if grid_level is not None and hasattr(calc, "grids"):
+        calc.grids.level = int(grid_level)
     
     # add GPU compatibility
     if is_gpu:

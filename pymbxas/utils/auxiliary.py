@@ -7,11 +7,15 @@ Created on Fri Sep 15 11:23:47 2023
 """
 
 import subprocess
+import logging
 import psutil
 import numpy as np
 import collections.abc
 
 from ase import Atoms
+
+
+logger = logging.getLogger(__name__)
 
 #%%
 # get available memory either for CPU or GPU
@@ -23,19 +27,19 @@ def get_available_memory(is_gpu=False):
             memory_free_values = [int(x.split()[0]) for x in memory_free_info]
             return memory_free_values[0]  # Return all GPU memory values
         except FileNotFoundError:
-            print("nvidia-smi is not installed or not found in PATH.")
+            logger.warning("Cannot query GPU memory: nvidia-smi was not found")
             return None
         except subprocess.CalledProcessError as e:
-            print(f"Error occurred while executing nvidia-smi: {e}")
+            logger.warning("Cannot query GPU memory: nvidia-smi failed: %s", e)
             return None
         except Exception as e:
-            print(f"An unexpected error occurred: {e}")
+            logger.warning("Cannot query GPU memory: %s", e)
             return None
     else:
         try:
             return int(psutil.virtual_memory().available / 1e6)
         except Exception as e:
-            print(f"An unexpected error occurred while retrieving system memory: {e}")
+            logger.warning("Cannot query available system memory: %s", e)
             return None
 
     
@@ -54,4 +58,3 @@ def as_list(inp):
         return list(inp)
     else:
         raise TypeError(f"Cannot convert type {type(inp)} to list")
-

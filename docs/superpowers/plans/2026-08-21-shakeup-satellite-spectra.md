@@ -15,9 +15,9 @@
 - Orders 1 and 2 only in this version. Order >=3 raises `NotImplementedError` naming the combinatorial-cost reason (spec: "Scope for this version").
 - No backward-compatibility gating for old saved HDF5 files — the `Spectra` schema change is unconditional, no fallback path.
 - Cross-spin convolution is out of scope, but `channel` is a first-class parameter everywhere shake-up math appears, so it needs no signature change later (spec: "Designed-in extension point").
-- No new test files. `tests/test_h2o_kedge.py` is pymbxas's one integration test by explicit project convention (`CLAUDE.md`); every new assertion is appended to it, in order, following the existing style (manual reimplementation compared against the library's own output).
+- No new test files. `tests/test_h2o_kedge.py` is pymbxas's one integration test by explicit project convention (`AGENTS.md`); every new assertion is appended to it, in order, following the existing style (manual reimplementation compared against the library's own output).
 - `shakeup_order=None` (the default) must produce output byte-identical to current `get_mbxas_spectra` behavior — hard regression requirement, not just an expectation.
-- `dev/method.md` is the physics authority and must be updated in the same change that alters what a returned array means (`CLAUDE.md` documentation-map rule).
+- `dev/method.md` is the physics authority and must be updated in the same change that alters what a returned array means (`AGENTS.md` documentation-map rule).
 - `CHANGELOG.md` gets a `### Added` entry under `[Unreleased]` (new capability, not a behavior change to existing default output).
 
 ---
@@ -974,7 +974,7 @@ git commit -m "Replace PySCF_mbxas.get_mbxas_spectra with a thin wrapper over Sp
 **Files:**
 - Modify: `dev/method.md`
 - Modify: `CHANGELOG.md`
-- Modify: `CLAUDE.md` (if the "get_mbxas_spectra exists on three classes" gotcha needs updating now that it's two)
+- Modify: `AGENTS.md` (if the "get_mbxas_spectra exists on three classes" gotcha needs updating now that it's two)
 
 **Interfaces:** none (documentation only).
 
@@ -1008,7 +1008,7 @@ In `CHANGELOG.md`, under `## [Unreleased]` -> `### Added`, add:
 - `get_mbxas_spectra(shakeup_order=1|2|"auto")` convolves in order-k valence shake-up satellite intensity beyond the one-body truncation
 ```
 
-- [ ] **Step 4: Update the `CLAUDE.md` "three classes" gotcha**
+- [ ] **Step 4: Update the `AGENTS.md` "three classes" gotcha**
 
 Find:
 
@@ -1025,6 +1025,6 @@ Replace with:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add dev/method.md CHANGELOG.md CLAUDE.md
+git add dev/method.md CHANGELOG.md AGENTS.md
 git commit -m "Document shake-up satellite spectra"
 ```

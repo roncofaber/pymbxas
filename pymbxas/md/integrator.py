@@ -274,6 +274,8 @@ class _Integrator(lib.StreamObject):
         if verbose is None:
             verbose = self.verbose
 
+        log = logger.new_logger(self, verbose)
+
         # Default velocities are 0 if none specified
         if self.veloc is None:
             self.veloc = np.full((self.mol.natm, 3), 0.0)
@@ -286,12 +288,10 @@ class _Integrator(lib.StreamObject):
 
         # avoid opening data_output file twice
         if type(self.data_output) is str:
-            if self.verbose > logger.QUIET:
-                if os.path.isfile(self.data_output):
-                    print('overwrite data output file: %s' %
-                          self.data_output)
-                else:
-                    print('data output file: %s' % self.data_output)
+            if os.path.isfile(self.data_output):
+                log.note('Overwriting MD data output: %s', self.data_output)
+            else:
+                log.note('MD data output: %s', self.data_output)
 
             if self.data_output == '/dev/null':
                 self.data_output = open(os.devnull, 'w')
@@ -305,13 +305,12 @@ class _Integrator(lib.StreamObject):
 
         # avoid opening trajectory_output file twice
         if type(self.trajectory_output) is str:
-            if self.verbose > logger.QUIET:
-                if os.path.isfile(self.trajectory_output):
-                    print('overwrite energy output file: %s' %
-                          self.trajectory_output)
-                else:
-                    print('trajectory output file: %s' %
-                          self.trajectory_output)
+            if os.path.isfile(self.trajectory_output):
+                log.note(
+                    'Overwriting MD trajectory output: %s',
+                    self.trajectory_output)
+            else:
+                log.note('MD trajectory output: %s', self.trajectory_output)
 
             if self.trajectory_output == '/dev/null':
                 self.trajectory_output = open(os.devnull, 'w')
@@ -319,7 +318,6 @@ class _Integrator(lib.StreamObject):
             else:
                 self.trajectory_output = open(self.trajectory_output, 'w')
 
-        log = logger.new_logger(self, verbose)
         self.check_sanity()
 
         if dump_flags and self.verbose > logger.NOTE:

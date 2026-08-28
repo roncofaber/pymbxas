@@ -7,6 +7,7 @@ Created on Thu Aug  3 15:29:31 2023
 """
 
 import logging
+import inspect
 
 import ase
 
@@ -19,18 +20,29 @@ from pymbxas.utils.auxiliary import get_available_memory
 
 logger = logging.getLogger(__name__)
 
+
+def _valid_build_keywords(pbc):
+    """Keywords explicitly supported by the installed PySCF build APIs."""
+    methods = [gto.Mole.build]
+    if pbc:
+        methods.append(pgto.Cell.build)
+    valid = set()
+    for method in methods:
+        valid.update(
+            name for name, parameter in inspect.signature(method).parameters.items()
+            if name != "self" and parameter.kind not in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            )
+        )
+    return valid
+
 #%%
 
 # convert an ase Atoms object to a mole or cell object for pyscf
 def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
                 verbose=4, print_output=True, log_file=None, symmetry=False,
-                is_gpu=False, append=False, **kwargs):
-
-    if kwargs:
-        logger.warning(
-            "ase_to_mole: forwarding unrecognized keyword(s) %s to pyscf's "
-            "Mole/Cell constructor; anything it doesn't recognize is "
-            "silently dropped, not raised.", sorted(kwargs))
+                is_gpu=False, append=False, log_context=None, **kwargs):
 
     # generate atom list to feed to object
     atom_list = []
@@ -42,11 +54,28 @@ def ase_to_mole(structure, charge=0, spin=0, basis='def2-svpd', pbc=None,
     
     if pbc is None:
         pbc = check_pbc(pbc, structure)
+
+    unknown = sorted(set(kwargs) - _valid_build_keywords(pbc))
+    if unknown:
+        raise TypeError(
+            "ase_to_mole received keyword(s) not supported by the installed "
+            f"PySCF {'Cell' if pbc else 'Mole'}.build API: {unknown}"
+        )
     
     # Create Logger instance (tees PySCF's own stdout, unrelated to the
     # module-level `logger` above)
-    stdout_logger = Logger(print_to_terminal=print_output, log_file=log_file,
-                    append=append)
+    context = None
+    if log_context is not None:
+        context = dict(log_context)
+        context.update({
+            "charge": charge,
+            "spin": spin,
+            "basis": basis,
+            "device": "GPU" if is_gpu else "CPU",
+        })
+    stdout_logger = Logger(
+        print_to_terminal=print_output, log_file=log_file, append=append,
+        section_context=context)
 
     # periodic system
     if pbc:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Sherman-Morrison rank-1 row updates for maxvol-style pivot swap search.
+"""Sherman-Morrison rank-1 row updates for maxvol-style pivot searches.
 
 Replacing one row of a square pivot matrix A with a new row is a rank-1
 update of A: A_new = A + e_r (new_row - old_row)^T. Recomputing inv(A) from
@@ -8,6 +8,10 @@ scratch after every swap -- what mbxas-qe's maxvol_multi_mod.f90 does via
 zgetrf/zgetri each iteration -- is O(n^3) per swap; Sherman-Morrison updates
 the existing inverse in O(n^2), the standard approach for this (e.g. what
 maxvolpy's own core loop does), not a bespoke optimization here.
+
+The spectral implementation deliberately does not use maxvol: mbxas-qe uses
+``maxvol_multi`` for occupied-subspace pivot selection, not for MB2/MB3
+spectral enumeration. This utility remains available for that distinct task.
 """
 
 import numpy as np

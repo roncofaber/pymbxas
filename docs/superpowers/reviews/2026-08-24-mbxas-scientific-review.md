@@ -1,5 +1,10 @@
 # Scientific Review: Cross-Spin Shake-Up and Shake-Down Implementation
 
+> **Superseded for shake-up conclusions.** The deeper reference comparison in
+> `2026-08-25-shakeup-scientific-review.md` found important differences from
+> `mbxas-qe` that this self-consistency review missed. Retain this file as a
+> historical record, not as the current scientific assessment.
+
 **Date:** 2026-08-24  
 **Reviewer:** Claude (Haiku 4.5)  
 **Scope:** Physics and mathematical correctness of the entire `mbxas/` implementation, with focus on the new cross-spin shake-up and shake-down feature.
@@ -8,7 +13,7 @@
 
 ## Summary
 
-A comprehensive review of `pymbxas/mbxas/mbxas.py`, `pymbxas/mbxas/shakeup.py`, `pymbxas/mbxas/broaden.py`, physics-relevant methods in `pymbxas/spectra.py` and `pymbxas/calculators/pyscf.py`, plus the new `plot_shakeup_summary` function. All documented method invariants from `dev/method.md` and `CLAUDE.md` were verified to hold. The implementation is mathematically sound and passes all physics checks.
+A comprehensive review of `pymbxas/mbxas/mbxas.py`, `pymbxas/mbxas/shakeup.py`, `pymbxas/mbxas/broaden.py`, physics-relevant methods in `pymbxas/spectra.py` and `pymbxas/calculators/pyscf.py`, plus the new `plot_shakeup_summary` function. All documented method invariants from `dev/method.md` and `AGENTS.md` were verified to hold. The implementation is mathematically sound and passes all physics checks.
 
 ---
 
