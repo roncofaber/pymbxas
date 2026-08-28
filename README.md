@@ -1,7 +1,3 @@
-<div align="center">
-  <img src="https://gitlab.com/uploads/-/system/project/avatar/47099716/pymbxas2_1_.png" height="120px"/>
-</div>
-
 PyMBXAS: Python-based many-body XAS implementation
 -----------------------------------------------
 
@@ -27,7 +23,7 @@ pip install pymbxas
 or if you want the most up to date version:
 
 ```bash
-pip install git+https://gitlab.com/roncofaber/pymbxas.git
+pip install git+https://github.com/roncofaber/pymbxas.git
 ```
 
 Alternatively, you can clone the repo and add it to your `PYTHONPATH`.
